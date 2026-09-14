@@ -3479,6 +3479,7 @@ class NewDirectIntegrationController extends Controller
             'sales_order_id'  => $data['SalesOrderId'] ?? null,
             'required_amount' => $data['RequiredAmount'] ?? 0,
             'TotalAmountSum'   => $data['TotalAmountSum'] ?? 0,
+            'PaidAmount'       => $data['PaidAmount'] ?? 0,
             'OrderTypeId'            => $data['OrderTypeId'] ?? null,
             'book_id'         => $data['BookId'] ?? null,
             'Worker'          => $data['Worker'] ?? null,
