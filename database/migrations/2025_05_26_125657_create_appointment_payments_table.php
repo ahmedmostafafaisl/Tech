@@ -1,0 +1,31 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+
+    public function up(): void
+    {
+        Schema::create('appointment_payments', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('appointment_id');
+            $table->string('payment_image')->nullable();
+            $table->string('payment_type')->nullable();
+            $table->string('payment_reference_id')->nullable();
+            $table->string('sales_line_id')->nullable();
+            $table->string('phone_number')->nullable();
+            $table->string('status')->default('pending');
+            $table->string('total_price')->nullable();
+            $table->timestamps();
+        });
+    }
+
+
+    public function down(): void
+    {
+        Schema::dropIfExists('appointment_payments');
+    }
+};

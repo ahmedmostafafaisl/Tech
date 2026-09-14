@@ -1,0 +1,66 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class EmergencyMainItem extends Model
+{
+    use HasFactory;
+    protected $fillable = [
+        'appointment_id',
+        'item_id',
+        'serial',
+        'floor',
+        'apart',
+        'room',
+        'code',
+        'name',
+        'quantity',
+        'description',
+        'image',
+        'price',
+        'sub_total_price',
+        'discount',
+        'discount_type',
+        'discount_value',
+        'total_price',
+        'status',
+        'payment_type',
+        'payment_status',
+        'check_list',
+        'valid_warranty',
+        'paid_service',
+        'missing',
+        'issues_reported_from_client',
+        'item_form_type',
+        'item_form_status'
+    ];
+    protected $casts = [
+        'check_list' => 'array',
+        'issues_reported_from_client' => 'array',
+        'valid_warranty' => 'boolean',
+        'paid_service' => 'boolean',
+        'missing' => 'boolean',
+    ];
+    public function appointment()
+    {
+        return $this->belongsTo(Appointment::class);
+    }
+
+    public function parts()
+    {
+        return $this->hasMany(EmergencyMainItemPart::class, 'emergency_main_item_id');
+    }
+
+    public function conditions()
+    {
+        return $this->hasMany(EmergencyItemCondition::class, 'emergency_main_item_id');
+    }
+
+    public function item()
+    {
+        return $this->belongsTo(Item::class, 'item_id');
+    }
+}

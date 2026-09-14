@@ -1,0 +1,3 @@
+php-fpm -F
+nginx
+php-queue

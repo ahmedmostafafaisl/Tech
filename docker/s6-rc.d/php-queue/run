@@ -1,0 +1,6 @@
+#!/command/execlineb -P
+# Start php-queue
+#exec php /var/www/html/artisan queue:work --sleep=3 --tries=3 --timeout=90
+# Run Laravel queue:work as www-data
+s6-setuidgid www-data \
+exec php /var/www/html/artisan queue:work --sleep=3 --tries=3 --timeout=90

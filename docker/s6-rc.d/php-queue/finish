@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "Queue worker exited with code $?"
+exit 0
