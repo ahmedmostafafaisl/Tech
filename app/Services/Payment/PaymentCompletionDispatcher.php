@@ -24,6 +24,22 @@ class PaymentCompletionDispatcher
         }
         $appointmentData = $this->getAppointmentDataFromDynamics($appointment);
         $required = (float) ($appointmentData['required_amount'] ?? 0);
+
+        // ✅ New required_amount calculation (Step 4 — same shared
+        // calculator/flag as sendPaymentLinks/completeAppointment/
+        // checkPaymentStatus). PaidAmount/used_balance are only present
+        // when $appointmentData came from the live DY365 response
+        // (source === 'dynamics'); the DB-fallback branch has neither
+        // key, so they safely default to 0 there — same as
+        // required_amount's own existing fallback.
+        if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+            $paidAmount  = (float) ($appointmentData['PaidAmount'] ?? 0);
+            $usedBalance = (float) ($appointmentData['used_balance'] ?? 0);
+
+            $required = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                ->calculate($required, $paidAmount, $usedBalance);
+        }
+
         $serialPayload = $this->buildSalesLinesSerial($appointmentData);
 
         // ✅ Read directly from the appointment record — the caller is
@@ -131,17 +147,37 @@ class PaymentCompletionDispatcher
         }
 
         // 4) build body
+        //
+        // PaidAmount / UsedBalance here are informational payload fields
+        // for DY365 — computed fresh from $appointmentData regardless of
+        // whether the new_required_amount_calculation_active flag is on,
+        // since they're just reporting what happened, not changing
+        // $required itself. UsedBalance specifically reflects the amount
+        // ACTUALLY consumed by the calculation (0 if paidAmount alone
+        // already covered everything), not the raw available balance
+        // DY365 reported — that's why calculateUsedBalanceApplied() is
+        // used here instead of just passing used_balance straight through.
+        $rawRequiredAmount = (float) ($appointmentData['required_amount'] ?? 0);
+        $paidAmountForBody = (float) ($appointmentData['PaidAmount'] ?? 0);
+        $usedBalanceApplied = app(RequiredAmountCalculator::class)->calculateUsedBalanceApplied(
+            $rawRequiredAmount,
+            $paidAmountForBody,
+            (float) ($appointmentData['used_balance'] ?? 0)
+        );
+
         $body = [
             '_contract' => array_merge([
                 'worker'            => $appointment->tech_id ?? null,
                 'SalesOrderId'      => $appointment->sales_order_id,
                 'BookId'            => $appointment->book_id,
                 'Discount'          => (float) ($appointment->discount ?? 0),
-                'UsedBalance'       => ($appointmentData['used_balance'] ?? null),
+                'PaidAmount'        => $paidAmountForBody,
+                'UsedBalance'       => $usedBalanceApplied,
                 'SalesLines'        => $salesLines,
-                // ⚠ FIXED: was 'InstalltionStatus' (typo) — dispatch()
-                // and preCheck() previously disagreed on this key name.
-                'InstalltionStatus' => $installmentStatus,
+                // ⚠ FIXED (again — this reverted back to the typo in a
+                // fresh clone since the earlier fix only ever existed as
+                // a file, never actually landed in the real repo):
+                'InstallmentStatus' => $installmentStatus,
             ], $serialPayload),
         ];
         // dd($appointment, $body);
@@ -339,6 +375,17 @@ class PaymentCompletionDispatcher
         // ── Load Dynamics data + required amount ──────────────────────────
         $appointmentData = $this->getAppointmentDataFromDynamics($appointment);
         $required        = (float) ($appointmentData['required_amount'] ?? 0);
+
+        // ✅ Same new calculation as dispatch() — kept in sync since this
+        // method exists specifically to predict dispatch()'s outcome.
+        if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+            $paidAmount  = (float) ($appointmentData['PaidAmount'] ?? 0);
+            $usedBalance = (float) ($appointmentData['used_balance'] ?? 0);
+
+            $required = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                ->calculate($required, $paidAmount, $usedBalance);
+        }
+
         $serialPayload   = $this->buildSalesLinesSerial($appointmentData);
 
         // ✅ Read directly from the appointment record, same as dispatch().

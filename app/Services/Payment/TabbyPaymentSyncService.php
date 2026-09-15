@@ -270,6 +270,28 @@ class TabbyPaymentSyncService
         $discount = (float) ($appointment->discount ?? 0);
         $required = (float) ($appointment->required_amount ?? 0);
 
+        // ✅ New required_amount calculation (Step 5 — same shared
+        // calculator/flag as Steps 1-4). Unlike those steps, this method
+        // only has the LOCAL DirectAppointment record on hand — no
+        // PaidAmount/used_balance exist locally — so a fresh DY365 fetch
+        // is needed specifically for this. Note: $paidSum above is the
+        // LOCAL sum of this app's own paid DirectAppointmentPayment rows,
+        // which may differ from DY365's own PaidAmount (e.g. cash/POS
+        // payments recorded only in DY365, not in this app's payments
+        // table) — $required below reflects DY365's view once fetched,
+        // while $paidSum below still reflects the local view; both feed
+        // into the same $allPaid check as before.
+        if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+            $appointmentData = app(DynamicsAppointmentDataFetcher::class)->fetch($appointment);
+
+            $dyRequiredAmount = (float) ($appointmentData['required_amount'] ?? $required);
+            $paidAmount       = (float) ($appointmentData['PaidAmount'] ?? 0);
+            $usedBalance      = (float) ($appointmentData['used_balance'] ?? 0);
+
+            $required = app(RequiredAmountCalculator::class)
+                ->calculate($dyRequiredAmount, $paidAmount, $usedBalance);
+        }
+
         $allPaid = $required > 0 && abs(($paidSum + $discount) - $required) < 0.01;
 
         if ($allPaid) {

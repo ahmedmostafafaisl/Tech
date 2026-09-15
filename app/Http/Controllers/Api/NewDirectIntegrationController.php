@@ -390,6 +390,22 @@ class NewDirectIntegrationController extends Controller
         $direct = DirectAppointment::where('book_id', $bookId)->latest('id')->first();
         $appointment['direct_id'] = $direct?->id;
 
+        // ✅ New required_amount calculation — same shared calculator/flag
+        // as the rest of the required_amount rework (sendPaymentLinks,
+        // completeAppointment, checkPaymentStatus, PaymentCompletionDispatcher,
+        // Tabby/Tamara/ClickPay reconciliation). Exposed here as a
+        // separate field rather than overwriting RequiredAmount itself,
+        // so existing consumers of this response aren't silently affected
+        // by a change in what RequiredAmount means.
+        if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+            $requiredAmount = (float) ($appointment['RequiredAmount'] ?? 0);
+            $paidAmount     = (float) ($appointment['PaidAmount'] ?? 0);
+            $usedBalance    = (float) ($appointment['UsedBalance'] ?? 0);
+
+            $appointment['new_required_amount'] = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                ->calculate($requiredAmount, $paidAmount, $usedBalance);
+        }
+
         return $this->setCode(200)
             ->setData($appointment)
             ->setMessage('Success.')
@@ -1609,6 +1625,23 @@ class NewDirectIntegrationController extends Controller
             $required_amount = (float) $singleAppointment['required_amount'];
             $lines = $singleAppointment['sales_lines'] ?? [];
 
+            // ✅ New required_amount calculation (Step 1 of the
+            // required_amount rework) — feature-flagged so it can be
+            // toggled without a code revert. When OFF, $required_amount
+            // stays exactly as it was before this change (the raw DY365
+            // value). When ON, it becomes:
+            //   required_amount - PaidAmount, then minus used_balance
+            //   (only if still > 0), never negative.
+            // Single source of truth: RequiredAmountCalculator — do not
+            // duplicate this formula elsewhere; reuse this same class.
+            if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+                $paidAmount  = (float) ($singleAppointment['PaidAmount'] ?? 0);
+                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+
+                $required_amount = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                    ->calculate($required_amount, $paidAmount, $usedBalance);
+            }
+
             // ✅ order_type تركيب/منتجات — TotalAmountSum < 500 vs >= 500
             // (real DY365 data, not the client-submitted items):
             //   - < 500 (and not tech-visit-only): sales_lines MUST
@@ -2027,6 +2060,21 @@ class NewDirectIntegrationController extends Controller
             $singleAppointment = $this->refSingleAppointmentByBookId($book_id);
             $required_amount   = (float) ($singleAppointment['required_amount'] ?? 0);
 
+            // ✅ New required_amount calculation (Step 3 — same shared
+            // calculator/flag as sendPaymentLinks/completeAppointment).
+            // Matters here because this value drives both which query
+            // branch runs below (paid vs free) AND what gets written back
+            // to collect/total_price/required_amount/status — an
+            // appointment already settled via PaidAmount/used_balance
+            // should be treated the same as required_amount == 0.
+            if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+                $paidAmount  = (float) ($singleAppointment['PaidAmount'] ?? 0);
+                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+
+                $required_amount = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                    ->calculate($required_amount, $paidAmount, $usedBalance);
+            }
+
             // ✅ use first version logic, but replace only the payment query
             if ($required_amount > 0) {
                 $payment = DirectAppointment::query()
@@ -2381,6 +2429,22 @@ class NewDirectIntegrationController extends Controller
             }
 
             $required_amount = (float) $required_amount;
+
+            // ✅ New required_amount calculation (Step 2 — same shared
+            // calculator/flag as sendPaymentLinks). This matters
+            // specifically here because this endpoint only proceeds for
+            // required_amount == 0 — without this, an appointment already
+            // fully settled via PaidAmount/used_balance in DY365 (but
+            // whose raw required_amount field is still nonzero) would be
+            // permanently rejected by the "Free appointments only" gate
+            // below, even though nothing is actually still owed.
+            if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+                $paidAmount  = (float) ($singleAppointment['PaidAmount'] ?? 0);
+                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+
+                $required_amount = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                    ->calculate($required_amount, $paidAmount, $usedBalance);
+            }
 
             // ✅ order_type تركيب/منتجات + TotalAmountSum < 500 →
             // sales_lines (real DY365 data, not the client-submitted
@@ -3478,8 +3542,13 @@ class NewDirectIntegrationController extends Controller
         return [
             'sales_order_id'  => $data['SalesOrderId'] ?? null,
             'required_amount' => $data['RequiredAmount'] ?? 0,
+            // ⚠ FIXED: this key was missing entirely — every read of
+            // $appointmentData['PaidAmount'] across Steps 1, 2, 3, 5, 6,
+            // and 7 of the required_amount rework has been silently
+            // falling back to 0 via `?? 0`, regardless of what DY365
+            // actually reported, because this array never included it.
+            'PaidAmount'      => $data['PaidAmount'] ?? 0,
             'TotalAmountSum'   => $data['TotalAmountSum'] ?? 0,
-            'PaidAmount'       => $data['PaidAmount'] ?? 0,
             'OrderTypeId'            => $data['OrderTypeId'] ?? null,
             'book_id'         => $data['BookId'] ?? null,
             'Worker'          => $data['Worker'] ?? null,

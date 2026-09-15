@@ -20,8 +20,7 @@ class TamaraPaymentSyncService
 {
     public function __construct(
         private readonly TamaraService $tamara,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{
@@ -159,6 +158,24 @@ class TamaraPaymentSyncService
         $paidSum  = (float) $appointment->payments()->where('status', 'paid')->sum('price');
         $discount = (float) ($appointment->discount ?? 0);
         $required = (float) ($appointment->required_amount ?? 0);
+
+        // ✅ New required_amount calculation (Step 6 — same shared
+        // calculator/flag/fetcher as Tabby's recalculateAppointment() in
+        // Step 5). Same note applies: $required below reflects DY365's
+        // view (net of PaidAmount/used_balance) once fetched, while
+        // $paidSum above stays the LOCAL sum of this app's own paid
+        // DirectAppointmentPayment rows — the two can legitimately differ
+        // if payments occur through channels this app doesn't track.
+        if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+            $appointmentData = app(DynamicsAppointmentDataFetcher::class)->fetch($appointment);
+
+            $dyRequiredAmount = (float) ($appointmentData['required_amount'] ?? $required);
+            $paidAmount       = (float) ($appointmentData['PaidAmount'] ?? 0);
+            $usedBalance      = (float) ($appointmentData['used_balance'] ?? 0);
+
+            $required = app(RequiredAmountCalculator::class)
+                ->calculate($dyRequiredAmount, $paidAmount, $usedBalance);
+        }
 
         $allPaid = $required > 0 && abs(($paidSum + $discount) - $required) < 0.01;
 
