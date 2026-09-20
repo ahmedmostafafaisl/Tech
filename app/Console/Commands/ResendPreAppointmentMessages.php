@@ -63,15 +63,15 @@ class ResendPreAppointmentMessages extends Command
 
             $buttonParameters = [
                 ["payload" => "{$message->appointment_id}Yes"],
-                // ["payload" => "{$message->appointment_id}Reschedule"],
-                // ["payload" => "{$message->appointment_id}Not interested"],
+                ["payload" => "{$message->appointment_id}Reschedule"],
+                ["payload" => "{$message->appointment_id}Not interested"],
             ];
 
             try {
                 $response = $whatsapp->sendTemplateMessage(
                     $message->phone,
-                    // 'pre_appointment_action_v3',
-                    'pre_appointment_action_v4',
+                    'pre_appointment_action_v3',
+                    // 'pre_appointment_action_v4',
                     $bodyParameters,
                     $buttonParameters,
                     'ar'

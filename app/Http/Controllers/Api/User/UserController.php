@@ -104,7 +104,7 @@ class UserController extends Controller
 
     public function verifyPinCode(VerifyPinCodeRequest $request)
     {
-        if ($request->update_version != 5 && $request->update_version != '1.3.5') {
+        if ($request->update_version != '1.3.7') {
             return $this->setCode(404)
                 ->setNeedUpdate(true)
                 ->setMaintenanceMode(false)
@@ -122,7 +122,7 @@ class UserController extends Controller
         $response = $this->userRepository->verifyPinCode($user, $request->pin_code);
 
         $data = $response->getData(true); // Convert JSON response to array
-        $data['need_update'] = $request->update_version != '1.3.5';
+        $data['need_update'] = $request->update_version != '1.3.7';
         $data['maintenance_mode'] = false;
         $response->setData($data);
         return $response;

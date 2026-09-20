@@ -75,14 +75,14 @@ class SendAppointmentConfirmations extends Command
             // button parameters
             $buttonParameters = [
                 ["payload" => "{$appointment->id}Yes"],
-                // ["payload" => "{$appointment->id}Reschedule"],
-                // ["payload" => "{$appointment->id}Not interested"],
+                ["payload" => "{$appointment->id}Reschedule"],
+                ["payload" => "{$appointment->id}Not interested"],
             ];
 
             $this->logToFile("Appointment ID {$appointment->id} payload: " . json_encode([
                 'phone'            => $data['phone'],
-                // 'template'         => 'pre_appointment_action_v3',
-                'pre_appointment_action_v4',
+                'template'         => 'pre_appointment_action_v3',
+                // 'pre_appointment_action_v4',
                 'bodyParameters'   => $bodyParameters,
                 'buttonParameters' => $buttonParameters,
                 'lang'             => 'ar'
@@ -91,8 +91,8 @@ class SendAppointmentConfirmations extends Command
             try {
                 $response = $whatsapp->sendTemplateMessage(
                     $data['phone'],
-                    // 'pre_appointment_action_v3',
-                    'pre_appointment_action_v4',
+                    'pre_appointment_action_v3',
+                    // 'pre_appointment_action_v4',
                     $bodyParameters,
                     $buttonParameters,
                     "ar"

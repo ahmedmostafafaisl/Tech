@@ -53,20 +53,15 @@ use App\Http\Controllers\Item\ItemController;
 use App\Http\Controllers\Part\PartController;
 use App\Http\Controllers\Task\TaskController;
 use App\Models\Appointment;
-use App\Models\AppointmentLine;
-use App\Models\Category;
 use App\Models\DirectAppointment;
 use App\Models\PreAppointmentMessage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\PersonalAccessToken;
 use Spatie\LaravelPdf\Facades\Pdf;
-
-use function PHPUnit\Framework\directoryExists;
 
 /*
 |--------------------------------------------------------------------------
@@ -124,7 +119,6 @@ Route::middleware('auth:sanctum')->prefix('customers')->group(function () {
     Route::get('/{id}', [CustomerController::class, 'show']);
 });
 
-
 // Technicians routes
 Route::middleware('auth:sanctum')->prefix('technician')->group(function () {
     Route::post('/users', [UserController::class, 'store']);
@@ -155,7 +149,7 @@ Route::middleware('auth:sanctum')->prefix('appointments')->group(function () {
     Route::get('/technician/{id}', [AppointmentController::class, 'getTechnicianAppointments']);
     // update appointment status  to on way or on site or hold
     Route::post('rescheduleOrCancel/{id}', [AppointmentController::class, 'rescheduleOrCancelAppointment']);
-    //get appointment Items,Parts
+    // get appointment Items,Parts
     Route::get('inventory/{id}', [AppointmentController::class, 'appointmentItemsAndParts']);
     Route::post('items/Parts/{id}', [AppointmentController::class, 'updateAppointmentItemsAndParts']);
     // complete appointment
@@ -330,7 +324,7 @@ Route::middleware('auth:sanctum')->prefix('emergency')->group(function () {
 Route::apiResource('user-logs', UserLogController::class);
 Route::get('user-logs/auth/user', [UserLogController::class, 'getAuthUserLogs'])->middleware('auth:sanctum');
 
-//sync custom warehouse stock  by item number
+// sync custom warehouse stock  by item number
 Route::get('dy365/sync-warehouses/stock/', [WarehouseController::class, 'syncCustomWarehouseStock']);
 // Sync custom technician stock
 Route::get('dy365/sync-technician/stock/{id}', [UserStockController::class, 'syncCustomTechnicianStock']);
@@ -356,7 +350,7 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     // Sync categories and warehouses
     Route::get('/sync-categories', [CategoryController::class, 'syncCategories']);
     Route::get('/sync-warehouses', [WarehouseController::class, 'syncWarehouses']);
-    //sync custom warehouse stock
+    // sync custom warehouse stock
     // Route::get('/sync-warehouses/stock/{id}', [WarehouseController::class, 'syncCustomWarehouseStock']);
     // Sync technicians stocks
     Route::get('/sync-technician/stock', [UserStockController::class, 'syncTechnicianStock']);
@@ -378,7 +372,7 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
 
     // Sync all technicians change status requests
     Route::get('/sync/technician/change-status-requests', [AppointmentChangeStatusRequestController::class, 'syncAllTechnicianChangeStatusRequests']);
-    //complete success payments
+    // complete success payments
     Route::get('/sync/complete-success-payments', [DyController::class, 'completeSuccessPayments']);
     // get sales history
     Route::get('/sales-history/{id}', [DyController::class, 'getSalesHistory']);
@@ -386,7 +380,6 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     // DY365 Payment
 });
 Route::post('dy365/payments/links', [DyController::class, 'getPaymentLinks']);
-
 
 Route::get('/tabby/success/reference_id={reference_id}/payment_method={payment_method}', [DyController::class, 'success'])->name('dy.tabby.success');
 Route::get('/tabby/cancel/reference_id={reference_id}/payment_method={payment_method}', [DyController::class, 'cancel'])->name('dy.tabby.cancel');
@@ -437,7 +430,6 @@ Route::prefix('clickpay')->group(function () {
     Route::match(['get', 'post'], '/return', [ClickPayController::class, 'handleReturn'])->name('clickpay.return');
     Route::match(['get', 'post'], '/return-dy', [ClickPayController::class, 'dyHandleReturn'])->name('dy.clickpay.return');
 });
-
 
 // Route::prefix('clickpay')->group(function () {
 //     Route::post('/callback', [ClickPayController::class, 'handleCallback'])->name('clickpay.callback');
@@ -506,21 +498,18 @@ Route::post('/test-complete-v2', [NewDirectIntegrationController::class, 'testCo
 
 Route::post('/run-appointments-reminder', [NewDirectIntegrationController::class, 'run_reminder']);
 
-
-
 Route::get('/empty-jobs', function () {
     DB::table('jobs')->truncate();
+
     return '✅ Jobs table emptied successfully.';
 });
 
-
-
 Route::get('/sync-single-warehouse/{warehouseId}', function ($warehouseId) {
-    $cmd = "php " . base_path('artisan') . " sync:single-warehouse-stock " . escapeshellarg($warehouseId) . " > /dev/null 2>&1 &";
+    $cmd = 'php ' . base_path('artisan') . ' sync:single-warehouse-stock ' . escapeshellarg($warehouseId) . ' > /dev/null 2>&1 &';
     exec($cmd);
+
     return response()->json(['message' => "✅ Background sync started for {$warehouseId}"]);
 });
-
 
 Route::get('/appointments/today/completed', function () {
     $today = Carbon::today();
@@ -546,7 +535,6 @@ Route::get('pre/appointments', function () {
     ]);
 });
 
-
 Route::get('/appointments/all/completed', function (Request $request) {
     $startDate = '2025-10-10';
     $endDate = now()->format('Y-m-d');
@@ -568,19 +556,17 @@ Route::get('/appointments/all/completed', function (Request $request) {
     ]);
 });
 
-
 Route::get('flag/appointments/true', function (Request $request) {
     $sales_order_id = $request->input('sales_order_id');
     $appointments = Appointment::where('sales_order_id', $sales_order_id)->first();
     $appointments->v2_flag = true;
     $appointments->save();
+
     return response()->json([
         'date' => $appointments,
         'message' => 'Flag set to true',
     ]);
 });
-
-
 
 Route::get('specific/appointments', function (Request $request) {
     return $appointments = DirectAppointment::whereDate('created_at', $request->date)
@@ -588,13 +574,9 @@ Route::get('specific/appointments', function (Request $request) {
         ->get();
 });
 
-
 Route::get('logout/users', function (Request $request) {
     PersonalAccessToken::query()->delete();
 });
-
-
-
 
 Route::get('/appointments/date/completed', function (Request $request) {
     $date = $request->input('date');
@@ -609,8 +591,6 @@ Route::get('/appointments/date/completed', function (Request $request) {
         'appointments' => $appointments,
     ]);
 });
-
-
 
 Route::middleware('auth:sanctum')->prefix('new')->group(function () {
     Route::post('/integration/today-appointments', [NewDirectIntegrationController::class, 'todayAppointments']);
@@ -638,7 +618,7 @@ Route::middleware('auth:sanctum')->prefix('new')->group(function () {
     Route::post('/integration/new/update-transfer-order-items', [TransferOrderController::class, 'newUpdate']);
     // used
     Route::post('/integration/new/delete-transfer-order', [TransferOrderController::class, 'newDestroy']);
-    //used
+    // used
     Route::post('/integration/new/transfer-orders/{tech_id}', [TransferOrderController::class, 'getTransferOrders']);
 
     // used
@@ -677,7 +657,7 @@ Route::get('/integration/tabby/success/reference_id={reference_id}/sales_order_i
 Route::get('/integration/tabby/cancel/reference_id={reference_id}/sales_order_id={sales_order_id}', [TabbyPaymentController::class, 'newCancel'])->name('new.tabby.cancel');
 Route::get('/integration/tabby/failure/reference_id={reference_id}/sales_order_id={sales_order_id}', [TabbyPaymentController::class, 'newFailure'])->name('new.tabby.failure');
 
-//tabby webhook
+// tabby webhook
 Route::post('/webhooks/tabby', [TabbyWebhookController::class, 'handle'])
     ->name('tabby.webhook');
 // GET /integration/tabby/sync-payment-status?payment_id=...
@@ -705,22 +685,19 @@ Route::post('/integration/clickpay/success/reference_id={reference_id}/sales_ord
 Route::post('/integration/clickpay/callback', [ClickPayController::class, 'newHandleCallback'])->name('new.clickpay.callback');
 Route::match(['get', 'post'], '/integration/clickpay/return', [ClickPayController::class, 'newHandleReturn'])->name('new.clickpay.return');
 
-
 Route::get('/invoice', function (Request $request) {
     return view('Invoice.invoice');
 });
 
-
 Route::get('/integration/get-or-update-invoice/{sales_order_id}', [NewDirectIntegrationController::class, 'generateInvoicePdf']);
-
 
 Route::post('/check-version', [AppVersionController::class, 'check']);
 Route::post('/app-version/update', [AppVersionController::class, 'updateAppVersion']);
 
-//getAmountDifferences
+// getAmountDifferences
 Route::post('/getAmountDifferences', [NewDirectIntegrationController::class, 'getAmountDifferences']);
 
-//export
+// export
 Route::get('power-bi-messages', [DashboardController::class, 'getAllPreMessagesPowerBiOld']);
 
 // Dashboard routes
@@ -735,7 +712,7 @@ Route::middleware('auth:sanctum')->prefix('dashboard')->group(function () {
     Route::post('/direct-appointments/send-dy-reminders', [DashboardController::class, 'sendDyReminders']);
     // 🔹 Get all pre appointment messages (with filters + pagination + counts)
     Route::get('pre-appointment-messages', [DashboardController::class, 'getAllPreMessages']);
-    //export
+    // export
     Route::get('pre-messages/export', [DashboardController::class, 'export']);
 
     // 🔹 Get single pre appointment message by ID
@@ -750,22 +727,18 @@ Route::middleware('auth:sanctum')->prefix('dashboard')->group(function () {
     // get all order lead  messages (with filters + pagination + counts)
     Route::resource('leads', LeadController::class)->only(['index', 'show']);
 
-
     // send evaluation
     Route::post('send/evaluation/{phone}/{orderType}/{bookId}', [EvaluationMessageController::class, 'createAndSendEvaluation']);
-
 
     Route::apiResource('evaluation-messages', EvaluationMessageController::class)->only(['index', 'show']);
     Route::get('evaluation-messages/phone/{phone}', [EvaluationMessageController::class, 'getByPhone']);
 });
-
 
 Route::middleware('auth:sanctum')->prefix('timeout-logs')->group(function () {
     Route::get('/', [TimeOutLogController::class, 'index']);
     Route::post('/update', [TimeOutLogController::class, 'update']);
     Route::post('/', [TimeOutLogController::class, 'store']);
 });
-
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/favorites/sales-orders', [FavoriteSalesOrderController::class, 'getFavorites']);
@@ -776,10 +749,8 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::post('/favorites/{sales_order_id}/toggle', [FavoriteSalesOrderController::class, 'toggleFavorite'])
     ->middleware('auth:sanctum');
 
-
 Route::get('/complete-issues', [CompleteIssueController::class, 'index']);
 Route::get('/complete-issues/{sales_order_id}', [CompleteIssueController::class, 'showBySalesOrder']);
-
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/send', [NotificationController::class, 'send']);
@@ -805,8 +776,6 @@ Route::get(
     [TamaraPaymentController::class, 'getOrderStatus']
 );
 
-
-
 // new complete form routes
 Route::prefix('v1/appointment-forms')->group(function () {
     Route::get('/types', [AppointmentFormController::class, 'types']);
@@ -827,7 +796,6 @@ Route::prefix('v1/appointment-forms')->group(function () {
     Route::get('/options/{optionId}/fields', [AppointmentFormController::class, 'fields']);
 });
 
-
 Route::middleware('auth:sanctum')
     ->prefix('v1/appointment-forms-admin')
     ->group(function () {
@@ -841,7 +809,6 @@ Route::middleware('auth:sanctum')
         Route::put('/options/{optionId}/fields', [AppointmentFormAdminController::class, 'setFields']);
     });
 
-
 Route::middleware('auth:sanctum')
     ->prefix('v1/appointment-forms-admin/bulk')
     ->group(function () {
@@ -853,14 +820,12 @@ Route::middleware('auth:sanctum')
         Route::post('/emergency/tree-with-fields', [AppointmentFormAdminController::class, 'storeEmergencyTreeWithFields']);
     });
 
-
 // for add new type
 Route::middleware('auth:sanctum')
     ->prefix('v1/appointment-forms-admin')
     ->group(function () {
         Route::post('/types/full', [AppointmentFormAdminController::class, 'storeTypeWithData']);
     });
-
 
 // submit complete form
 Route::middleware('auth:sanctum')
@@ -869,16 +834,12 @@ Route::middleware('auth:sanctum')
         Route::post('/submit', [AppointmentFormSubmissionController::class, 'submit']);
     });
 
-
 // get submission with values and fields for specific sales order or book id
 Route::middleware('auth:sanctum')
     ->prefix('v1/appointment-forms')
     ->group(function () {
         Route::get('/submission/sales-order', [AppointmentFormSubmissionController::class, 'getBySalesOrderOrBook']);
     });
-
-
-
 
 Route::get('/health', fn() => response()->json(['status' => 'ok'], 200));
 
@@ -887,7 +848,7 @@ Route::get('/health', fn() => response()->json(['status' => 'ok'], 200));
 Route::middleware('auth:sanctum')->group(function () {
     // change request reasons
     Route::get('/change-request-reasons', [NewDirectIntegrationController::class, 'changeRequestReasons']);
-    //change customer name
+    // change customer name
     Route::post('/change-customer-name', [NewDirectIntegrationController::class, 'changeCustomerName']);
     // add registration number to
     Route::post('/add-registration-number', [NewDirectIntegrationController::class, 'addRegistrationNumber']);
@@ -897,9 +858,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/appointments/resend-attachments', [CompleteFormController::class, 'resendAttachmentsToDynamicsByBookId']);
 });
 
-
 // appointment cooldown  timer
-
 
 Route::middleware('auth:sanctum')->prefix('settings')->group(function () {
     Route::get('/appointment-cooldown', [SettingController::class, 'index']);
@@ -909,15 +868,13 @@ Route::middleware('auth:sanctum')->prefix('settings')->group(function () {
     Route::put('/transfer-orders/technician-to-technician/status', [SettingController::class, 'updateTechnicianToTechnicianStatus']);
 });
 
-
 // invoice settings
 Route::get('/invoice-settings', [InvoiceSettingController::class, 'index']);
 Route::get('/invoice-settings/{key}', [InvoiceSettingController::class, 'show']);
 Route::middleware('auth:sanctum')->put('/invoice-settings/{key}', [InvoiceSettingController::class, 'update']);
 
-
 // invoice PDF routes
-Route::get('/invoice/{id}/view',     [Invoice2Controller::class, 'stream'])
+Route::get('/invoice/{id}/view', [Invoice2Controller::class, 'stream'])
     ->name('invoice.view');
 
 Route::get('/invoice2/{id}/view', [Invoice2Controller::class, 'stream'])
@@ -926,49 +883,44 @@ Route::get('/invoice2/{id}/view', [Invoice2Controller::class, 'stream'])
 Route::get('/invoice/{id}/download', [Invoice2Controller::class, 'download'])
     ->name('invoice.download');
 
-Route::post('/invoice/send-link', [App\Http\Controllers\Api\Invoice\InvoiceController::class, 'sendInvoiceLink'])
+Route::post('/invoice/send-link', [InvoiceController::class, 'sendInvoiceLink'])
     ->name('invoice.send-link');
-
 
 Route::get('invoice/debug/{id}', [App\Http\Controllers\Api\Pdf\InvoiceController::class, 'debug']);
 Route::get('invoice/debug-chrome', [Invoice2Controller::class, 'debugChrome']);
 
-
 // change status reasons
 Route::middleware('auth:sanctum')->prefix('change-request-reasons')->group(function () {
-    Route::get('/',        [ChangeRequestReasonController::class, 'index']);
-    Route::get('/{id}',   [ChangeRequestReasonController::class, 'show']);
-    Route::post('/',      [ChangeRequestReasonController::class, 'store']);
-    Route::put('/{id}',   [ChangeRequestReasonController::class, 'update']);
+    Route::get('/', [ChangeRequestReasonController::class, 'index']);
+    Route::get('/{id}', [ChangeRequestReasonController::class, 'show']);
+    Route::post('/', [ChangeRequestReasonController::class, 'store']);
+    Route::put('/{id}', [ChangeRequestReasonController::class, 'update']);
     // Route::delete('/{id}', [ChangeRequestReasonController::class, 'destroy']);
 });
-
-
 
 Route::middleware('auth:sanctum')->prefix('appointment-transactions')->group(function () {
 
     // ===== Transactions =====
-    Route::get('/',        [AppointmentTransactionController::class, 'index']);
-    Route::post('/',       [AppointmentTransactionController::class, 'store']);
-    Route::get('/{id}',    [AppointmentTransactionController::class, 'show']);
-    Route::put('/{id}',    [AppointmentTransactionController::class, 'update']);
+    Route::get('/', [AppointmentTransactionController::class, 'index']);
+    Route::post('/', [AppointmentTransactionController::class, 'store']);
+    Route::get('/{id}', [AppointmentTransactionController::class, 'show']);
+    Route::put('/{id}', [AppointmentTransactionController::class, 'update']);
     Route::delete('/{id}', [AppointmentTransactionController::class, 'destroy']);
 
     // ===== Lines =====
-    Route::get('/{transactionId}/lines',   [AppointmentTransactionController::class, 'indexLines']);
-    Route::post('/{transactionId}/lines',  [AppointmentTransactionController::class, 'storeLine']);
-    Route::get('/lines/{lineId}',          [AppointmentTransactionController::class, 'showLine']);
-    Route::put('/lines/{lineId}',          [AppointmentTransactionController::class, 'updateLine']);
-    Route::delete('/lines/{lineId}',       [AppointmentTransactionController::class, 'destroyLine']);
+    Route::get('/{transactionId}/lines', [AppointmentTransactionController::class, 'indexLines']);
+    Route::post('/{transactionId}/lines', [AppointmentTransactionController::class, 'storeLine']);
+    Route::get('/lines/{lineId}', [AppointmentTransactionController::class, 'showLine']);
+    Route::put('/lines/{lineId}', [AppointmentTransactionController::class, 'updateLine']);
+    Route::delete('/lines/{lineId}', [AppointmentTransactionController::class, 'destroyLine']);
 
     // ===== Serials =====
-    Route::get('/lines/{lineId}/serials',  [AppointmentTransactionController::class, 'indexSerials']);
+    Route::get('/lines/{lineId}/serials', [AppointmentTransactionController::class, 'indexSerials']);
     Route::post('/lines/{lineId}/serials', [AppointmentTransactionController::class, 'storeSerial']);
-    Route::get('/serials/{serialId}',      [AppointmentTransactionController::class, 'showSerial']);
-    Route::put('/serials/{serialId}',      [AppointmentTransactionController::class, 'updateSerial']);
-    Route::delete('/serials/{serialId}',   [AppointmentTransactionController::class, 'destroySerial']);
+    Route::get('/serials/{serialId}', [AppointmentTransactionController::class, 'showSerial']);
+    Route::put('/serials/{serialId}', [AppointmentTransactionController::class, 'updateSerial']);
+    Route::delete('/serials/{serialId}', [AppointmentTransactionController::class, 'destroySerial']);
 });
-
 
 // get products and bundle products
 Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
@@ -976,9 +928,8 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     Route::post('/bundle-products', [DyController::class, 'getBundleProducts']);
     Route::post('/add-bundle-product/appointment', [DyController::class, 'addBundleProductsToAppointment']);
 });
-//get all short links for invoices
+// get all short links for invoices
 Route::middleware('auth:sanctum')->get('/short-links', [ShortLinkController::class, 'index']);
-
 
 // get change status request by book id
 Route::get('/change-status-request/book/{book_id}', [NewDirectIntegrationController::class, 'getChangeRequestsByBookId']);
@@ -986,16 +937,14 @@ Route::get('/change-status-request/book/{book_id}', [NewDirectIntegrationControl
 // get appointment details by book id
 Route::middleware('auth:sanctum')->post('/appointment-details/book', [InvoiceController::class, 'getInvoiceDetailsByBookId']);
 
-
 Route::get('/test-log', function () {
-    \Log::error('Test Telegram error from Laravel');
+    Log::error('Test Telegram error from Laravel');
+
     return 'sent';
 });
 
-
 // order lead
 Route::post('order_lead', [OrderController::class, 'store']);
-
 
 Route::get('export/excel', [DashboardController::class, 'getAllPreMessagesPowerBi']);
 Route::get('export/excel/status/{token}', [DashboardController::class, 'exportStatus'])
@@ -1007,10 +956,8 @@ Route::middleware('powerbi.auth')
 Route::middleware('powerbi.auth')
     ->get('power-bi-messages/download', [DashboardController::class, 'downloadPreMessagesExport']);
 
-
 Route::middleware('powerbi.auth')
     ->get('power-bi-messages/all', [DashboardController::class, 'getAllPreMessagesBi']);
-
 
 // // ===== EXISTING — untouched, exactly as before =====
 // Route::middleware('auth:sanctum')->prefix('settings')->group(function () {
@@ -1040,6 +987,16 @@ Route::middleware('auth:sanctum')->get('/admin/system/config-health', [SystemHea
 // Create-or-update a ChangeRequest for an appointment (matched by book_id + sales_order_id)
 Route::post('/change-requests/upsert', [ChangeRequestController::class, 'upsert']);
 
-
-
 Route::get('/specific/book_id/serial/{bookId}', [NewDirectIntegrationController::class, 'deleteAppointmentTransactionSerials']);
+
+// Search for a specific serial across appointment transaction serials
+Route::middleware('auth:sanctum')->post('/integration/appointment-transaction-serials/search', [NewDirectIntegrationController::class, 'searchAppointmentTransactionSerial']);
+
+// Delete a serial if its owning appointment (checked live via DY365) is not found or not Completed
+Route::middleware('auth:sanctum')->post('/integration/appointment-transaction-serials/cleanup', [NewDirectIntegrationController::class, 'deleteAppointmentTransactionSerial']);
+
+// Technicians whose primary main warehouse matches the given MainWarehouseId
+Route::middleware('auth:sanctum')->get('/integration/technicians/by-primary-warehouse', [NewDirectIntegrationController::class, 'techniciansByPrimaryWarehouse']);
+
+// Delete a DirectAppointment and its payments by book_id
+Route::middleware('auth:sanctum')->post('/integration/appointment/delete', [NewDirectIntegrationController::class, 'deleteDirectAppointment']);

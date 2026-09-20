@@ -256,6 +256,11 @@ class WarehouseController extends Controller
     {
         return $user->warehouses()
             ->select('warehouses.id', 'warehouses.name', 'warehouses.invent_location_id', 'warehouses.rec_id')
-            ->get();
+            ->get()
+            ->map(function ($warehouse) {
+                $warehouse->is_primary = (int) $warehouse->pivot->is_primary;
+                unset($warehouse->pivot);
+                return $warehouse;
+            });
     }
 }

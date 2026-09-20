@@ -296,15 +296,15 @@ class WhatsAppController extends Controller
 
         $buttonParameters = [
             ["payload" => "{$data['appointment_id']}Yes"],
-            // ["payload" => "{$data['appointment_id']}Reschedule"],
-            // ["payload" => "{$data['appointment_id']}Not interested"],
+            ["payload" => "{$data['appointment_id']}Reschedule"],
+            ["payload" => "{$data['appointment_id']}Not interested"],
         ];
 
         try {
             $response = $whatsapp->sendTemplateMessage(
                 $data['phone'],
-                // 'pre_appointment_action_v3',
-                'pre_appointment_action_v4',
+                'pre_appointment_action_v3',
+                // 'pre_appointment_action_v4',
                 $bodyParameters,
                 $buttonParameters,
                 'ar'
@@ -391,8 +391,8 @@ class WhatsAppController extends Controller
 
         $buttonParameters = [
             ["payload" => "{$data['appointment_id']}Yes"],
-            // ["payload" => "{$data['appointment_id']}Reschedule"],
-            // ["payload" => "{$data['appointment_id']}Not interested"],
+            ["payload" => "{$data['appointment_id']}Reschedule"],
+            ["payload" => "{$data['appointment_id']}Not interested"],
         ];
 
         // ✅ Dispatch to queue
@@ -924,10 +924,10 @@ class WhatsAppController extends Controller
                 );
 
                 $q2Response = $q2->json();
-                TelegramService::send(
-                    "📩 isQ1Sent q2Response \n\n" .
-                        json_encode($q2Response, JSON_PRETTY_PRINT)
-                );
+                // TelegramService::send(
+                //     "📩 isQ1Sent q2Response \n\n" .
+                //         json_encode($q2Response, JSON_PRETTY_PRINT)
+                // );
                 if (
                     isset($q2Response['messages'][0]['message_status']) &&
                     $q2Response['messages'][0]['message_status'] === 'accepted'
@@ -953,10 +953,10 @@ class WhatsAppController extends Controller
                 );
 
                 $q2Response = $q2->json();
-                TelegramService::send(
-                    "📩 isQ1Sent q2Response \n\n" .
-                        json_encode($q2Response, JSON_PRETTY_PRINT)
-                );
+                // TelegramService::send(
+                //     "📩 isQ1Sent q2Response \n\n" .
+                //         json_encode($q2Response, JSON_PRETTY_PRINT)
+                // );
                 if (
                     isset($q2Response['messages'][0]['message_status']) &&
                     $q2Response['messages'][0]['message_status'] === 'accepted'

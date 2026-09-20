@@ -35,8 +35,8 @@ class SendPreAppointmentMessageJob implements ShouldQueue
         try {
             $response = $whatsapp->sendTemplateMessage(
                 $this->message->phone,
-                // 'pre_appointment_action_v3',
-                'pre_appointment_action_v4',
+                'pre_appointment_action_v3',
+                // 'pre_appointment_action_v4',
                 $this->bodyParameters,
                 $this->buttonParameters,
                 'ar'

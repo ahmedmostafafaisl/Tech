@@ -198,7 +198,22 @@ class TransferOrderController extends Controller
 
     public function newDestroy(DeleteTransferOrderRequest $request)
     {
-        return  $this->service->delete($request->transferOrderId);
+        $response = $this->service->delete($request->transferOrderId);
+
+        $isSuccess = is_array($response) && ($response['Status'] ?? false) === true;
+
+        if (!$isSuccess) {
+
+            $statusCode = (int) ($response['Code'] ?? 400);
+
+            if ($statusCode < 400 || $statusCode > 599) {
+                $statusCode = 400;
+            }
+
+            return response()->json($response, $statusCode);
+        }
+
+        return response()->json($response, 200);
     }
 
     // tech transfers

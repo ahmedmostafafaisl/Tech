@@ -109,6 +109,8 @@ class DyController extends Controller
         return response()->json(['message' => 'No Technicians found.'], 404);
     }
 
+
+
     // get customers
     public function getCustomers(Request $request)
     {

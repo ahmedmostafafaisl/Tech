@@ -104,15 +104,15 @@ class SendPaymentLinksRequest extends FormRequest
                 }
             }
 
-            // ── 2) InstallmentStatus rules for fes-tech-visit / dlv-fee1 ────────
+            // ── 2) InstallmentStatus rules for fes-tech-visit / fes-transportation ────────
             $items = $this->input('items', []);
             $installmentStatus = $this->input('InstallmentStatus');
 
             $hasFesTechVisit = collect($items)->contains(
                 fn($item) => strtolower(trim($item['ItemNumber'] ?? '')) === 'fes-tech-visit'
             );
-            $hasDlvFee1 = collect($items)->contains(
-                fn($item) => strtolower(trim($item['ItemNumber'] ?? '')) === 'dlv-fee1'
+            $hasFesTransportation = collect($items)->contains(
+                fn($item) => strtolower(trim($item['ItemNumber'] ?? '')) === 'fes-transportation'
             );
 
             if ($installmentStatus === 'Need_installation') {
@@ -135,12 +135,12 @@ class SendPaymentLinksRequest extends FormRequest
                 }
             }
 
-            // fes-tech-visit and dlv-fee1 can never appear together,
+            // fes-tech-visit and fes-transportation can never appear together,
             // regardless of InstallmentStatus.
-            if ($hasFesTechVisit && $hasDlvFee1) {
+            if ($hasFesTechVisit && $hasFesTransportation) {
                 $validator->errors()->add(
                     'items',
-                    'combination_validation(fes-tech-visit,dlv-fee1)'
+                    'combination_validation(fes-tech-visit,fes-transportation)'
                 );
             }
 

@@ -101,7 +101,9 @@ class User extends Authenticatable
     // warehouses
     public function warehouses()
     {
-        return $this->belongsToMany(Warehouse::class, 'user_warehouses', 'user_id', 'warehouse_id');
+        return $this->belongsToMany(Warehouse::class, 'user_warehouses', 'user_id', 'warehouse_id')
+            ->withPivot('is_primary')
+            ->withTimestamps();
     }
     protected function getUserWarehouses(User $user)
     {

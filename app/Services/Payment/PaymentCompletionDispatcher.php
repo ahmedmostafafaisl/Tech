@@ -49,7 +49,7 @@ class PaymentCompletionDispatcher
         // caller to also pass it separately as an extra argument.
         $installmentStatus = $appointment->installment_status;
 
-        // Same InstallmentStatus/fes-tech-visit/dlv-fee1 rules as
+        // Same InstallmentStatus/fes-tech-visit/fes-transportation rules as
         // SendPaymentLinksRequest / NewCompleteAppointmentRequest, checked
         // here against the appointment's real sales lines (not payment
         // lines) instead of client-submitted items.
@@ -171,13 +171,13 @@ class PaymentCompletionDispatcher
                 'SalesOrderId'      => $appointment->sales_order_id,
                 'BookId'            => $appointment->book_id,
                 'Discount'          => (float) ($appointment->discount ?? 0),
-                'PaidAmount'        => $paidAmountForBody,
-                'UsedBalance'       => $usedBalanceApplied,
+                // 'PaidAmount'        => $paidAmountForBody,
+                'UsedBalance'       => $usedBalanceApplied ?? 0,
                 'SalesLines'        => $salesLines,
                 // ⚠ FIXED (again — this reverted back to the typo in a
                 // fresh clone since the earlier fix only ever existed as
                 // a file, never actually landed in the real repo):
-                'InstallmentStatus' => $installmentStatus,
+                'InstalltionStatus' => $installmentStatus,
             ], $serialPayload),
         ];
         // dd($appointment, $body);
@@ -301,7 +301,7 @@ class PaymentCompletionDispatcher
     }
 
     /**
-     * Same InstallmentStatus/fes-tech-visit/dlv-fee1 rule set as
+     * Same InstallmentStatus/fes-tech-visit/fes-transportation rule set as
      * SendPaymentLinksRequest / NewCompleteAppointmentRequest, checked
      * against the appointment's real sales_lines. Shared between
      * dispatch() and preCheck() so they can never drift apart.
@@ -312,8 +312,14 @@ class PaymentCompletionDispatcher
     protected function validateInstallmentStatusItems(DirectAppointment $appointment, array $appointmentData): ?array
     {
         $installmentStatus = $appointment->installment_status;
+        $orderType = $appointmentData['OrderTypeId'] ?? $appointment->order_type;
 
-        if ($appointment->order_type !== 'تركيب') {
+        // Widened from تركيب-only: the delivery-fee/TotalAmountSum rule
+        // below also applies to منتجات, so both types need to reach this
+        // method now. The InstallmentStatus-specific sub-checks further
+        // below remain scoped to تركيب only, since InstallmentStatus is
+        // only ever populated for that order type.
+        if (!in_array($orderType, ['تركيب', 'منتجات'], true)) {
             return null;
         }
 
@@ -323,7 +329,7 @@ class PaymentCompletionDispatcher
             fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
         );
         $hasDlvFee1 = collect($salesLines)->contains(
-            fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'dlv-fee1'
+            fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
         );
 
         if ($installmentStatus === 'Need_installation') {
@@ -352,8 +358,58 @@ class PaymentCompletionDispatcher
             return [
                 'ok'     => false,
                 'reason' => 'fes_tech_visit_dlv_fee1_conflict',
-                'detail' => 'ItemNumber = fes-tech-visit and ItemNumber = dlv-fee1 cannot both be present on the same appointment.',
+                'detail' => 'ItemNumber = fes-tech-visit and ItemNumber = fes-transportation cannot both be present on the same appointment.',
             ];
+        }
+
+        // Same TotalAmountSum/fes-transportation rule as SendPaymentLinksRequest /
+        // NewCompleteAppointmentRequest's controller-level check:
+        //   - TotalAmountSum < 500 (and not tech-visit-only) → sales_lines
+        //     MUST include fes-transportation.
+        //   - TotalAmountSum >= 500 → sales_lines must NOT include fes-transportation.
+        $totalAmountSum = (float) ($appointmentData['TotalAmountSum'] ?? 0);
+        $logService = app(\App\Services\Logs\TechnicianAppointmentLogService::class);
+
+        if ($totalAmountSum < 500) {
+            if (!$hasFesTechVisit && !$hasDlvFee1) {
+                $logService->validationFailed(
+                    techId: $appointment->tech_id,
+                    action: 'payment_completion_dispatch',
+                    bookId: $appointment->book_id,
+                    salesOrderId: $appointment->sales_order_id,
+                    message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
+                    responsePayload: [
+                        'order_type_id'    => $orderType,
+                        'total_amount_sum' => $totalAmountSum,
+                    ],
+                );
+
+                return [
+                    'ok'     => false,
+                    'reason' => 'total_sum_validation_lower_than_500_missing_delivery_fee',
+                    'detail' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
+                ];
+            }
+        } else {
+            if ($hasDlvFee1) {
+                $logService->validationFailed(
+                    techId: $appointment->tech_id,
+                    action: 'payment_completion_dispatch',
+                    bookId: $appointment->book_id,
+                    salesOrderId: $appointment->sales_order_id,
+                    message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
+                    responsePayload: [
+                        'order_type_id'    => $orderType,
+                        'total_amount_sum' => $totalAmountSum,
+                    ],
+                );
+
+                return [
+                    'ok'     => false,
+                    'reason' => 'total_sum_validation_500_or_more_unexpected_delivery_fee',
+                    'detail' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
+                ];
+            }
         }
 
         return null;
@@ -391,7 +447,7 @@ class PaymentCompletionDispatcher
         // ✅ Read directly from the appointment record, same as dispatch().
         $installmentStatus = $appointment->installment_status;
 
-        // Same InstallmentStatus/fes-tech-visit/dlv-fee1 rules as
+        // Same InstallmentStatus/fes-tech-visit/fes-transportation rules as
         // dispatch() — kept in sync via the shared helper since this
         // method exists specifically to predict dispatch()'s outcome
         // before allowing form submission.
@@ -479,6 +535,7 @@ class PaymentCompletionDispatcher
                 'worker'            => $appointment->tech_id ?? null,
                 'SalesOrderId'      => $appointment->sales_order_id,
                 'BookId'            => $appointment->book_id,
+                // 'UsedBalance'       => (float) ($appointment->used_balance ?? 0),
                 'Discount'          => (float) ($appointment->discount ?? 0),
                 'SalesLines'        => $salesLines,
                 'InstalltionStatus' => $installmentStatus,

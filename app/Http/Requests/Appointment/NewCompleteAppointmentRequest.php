@@ -63,7 +63,7 @@ class NewCompleteAppointmentRequest extends FormRequest
                 }
             }
 
-            // ── 2) InstallmentStatus rules for fes-tech-visit / dlv-fee1 ────────
+            // ── 2) InstallmentStatus rules for fes-tech-visit / fes-transportation ────────
             $items = $this->input('items', []);
             $installmentStatus = $this->input('InstallmentStatus');
 
@@ -71,7 +71,7 @@ class NewCompleteAppointmentRequest extends FormRequest
                 fn($item) => strtolower(trim($item['ItemNumber'] ?? '')) === 'fes-tech-visit'
             );
             $hasDlvFee1 = collect($items)->contains(
-                fn($item) => strtolower(trim($item['ItemNumber'] ?? '')) === 'dlv-fee1'
+                fn($item) => strtolower(trim($item['ItemNumber'] ?? '')) === 'fes-transportation'
             );
 
             if ($installmentStatus === 'Need_installation') {
@@ -90,12 +90,12 @@ class NewCompleteAppointmentRequest extends FormRequest
                 }
             }
 
-            // fes-tech-visit and dlv-fee1 can never appear together,
+            // fes-tech-visit and fes-transportation can never appear together,
             // regardless of InstallmentStatus.
             if ($hasFesTechVisit && $hasDlvFee1) {
                 $validator->errors()->add(
                     'items',
-                    'combination_validation(fes-tech-visit,dlv-fee1)'
+                    'combination_validation(fes-tech-visit,fes-transportation)'
                 );
             }
 

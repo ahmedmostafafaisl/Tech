@@ -15,7 +15,7 @@ class NewCreateTransferOrderRequest extends FormRequest
     {
         return [
             'tech_id' => 'required|string',
-            'type' => 'required|string|in:TechnicianToWarehouse,WarehouseToTechnician,TechToTech',
+            'type' => 'required|string|in:TechnicianToWarehouse,WarehouseToTechnician,TechToTech,TechnicianToTechnician',
             'TechnicianPersonnelNumber' => 'required|string',
             'fromWarehouseId' => 'required|string',
             'toWarehouseId' => 'required|string',

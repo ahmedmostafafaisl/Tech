@@ -35,10 +35,10 @@ class TransferOrderService
 
         $payload = $this->mapToDyPayload($data);
 
-        TelegramService::send(
-            "📩 CreateTransferOrder payload \n\n" .
-                json_encode($payload, JSON_PRETTY_PRINT)
-        );
+        // TelegramService::send(
+        //     "📩 CreateTransferOrder payload \n\n" .
+        //         json_encode($payload, JSON_PRETTY_PRINT)
+        // );
         // expected NewTransferOrderResource.
         $response = $this->dyService->createTransferOrder($payload);
 
@@ -211,10 +211,10 @@ class TransferOrderService
         }
 
         $payload = ['_contract' => $contract];
-        TelegramService::send(
-            "📩 updateTransferOrder payload \n\n" .
-                json_encode($payload, JSON_PRETTY_PRINT)
-        );
+        // TelegramService::send(
+        //     "📩 updateTransferOrder payload \n\n" .
+        //         json_encode($payload, JSON_PRETTY_PRINT)
+        // );
 
         // ⚠ FIXED: this was `return $response = $this->dyService->updateTransferOrder($payload);`
         // — a stray early return that exited the function immediately
@@ -285,20 +285,11 @@ class TransferOrderService
 
     public function delete($transferOrderId)
     {
-        // $order = TransferOrder::where('transfer_id', $transferOrderId)
-        //     ->orderByDesc('id')
-        //     ->first();
-
         $payload = [
             '_contract' => [
                 'TransferId' => $transferOrderId,
             ],
         ];
-
-        // Delete only if record exists
-        // if ($order) {
-        //     $this->repo->delete($order->id);
-        // }
 
         return $this->dyService->deleteTransferOrder($payload);
     }
