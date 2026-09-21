@@ -14,15 +14,39 @@ class LeadService
      */
     public function createLead(array $data): OrderLead
     {
+        $attempts = 0;
 
-        return OrderLead::create([
+        do {
+            $attempts++;
 
-            'customer_name' => $data['customer_name'] ?? null,
-            'mobile_number' => $data['mobile_number'] ?? null,
-            'product'       => $data['product'] ?? null,
-            'rec_id'        => $data['rec_id'] ?? null,
-            'status'        => 'pending',
-        ]);
+            try {
+                return \Illuminate\Support\Facades\DB::transaction(function () use ($data) {
+                    return OrderLead::create([
+                        'customer_name' => $data['customer_name'] ?? null,
+                        'mobile_number' => $data['mobile_number'] ?? null,
+                        'product'       => $data['product'] ?? null,
+                        'rec_id'        => $data['rec_id'] ?? null,
+                        'status'        => 'pending',
+                    ]);
+                });
+            } catch (\Illuminate\Database\QueryException $e) {
+                // 23000 = integrity constraint violation. This wraps the
+                // create in a real transaction so generateOrderNumber()'s
+                // lockForUpdate() actually takes effect (it previously did
+                // nothing at all outside a transaction) — but locking a
+                // MAX() query can't help when there's no existing row yet
+                // to lock against (e.g. the very first lead of a given
+                // day), so two truly simultaneous first-of-day requests
+                // can still both compute the same number. Retry with a
+                // freshly-generated one rather than surfacing a 500.
+                $isDuplicateOrderNumber = $e->getCode() === '23000'
+                    && str_contains($e->getMessage(), 'order_leads_order_number_unique');
+
+                if (!$isDuplicateOrderNumber || $attempts >= 3) {
+                    throw $e;
+                }
+            }
+        } while (true);
     }
 
     /**
