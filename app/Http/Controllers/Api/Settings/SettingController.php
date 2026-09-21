@@ -13,7 +13,7 @@ class SettingController extends Controller
     public function index()
     {
         return response()->json([
-            'appointment_cooldown_minutes' => (int) Setting::get('appointment_cooldown_minutes', 10),
+            'appointment_cooldown_minutes' => (int) Setting::get('appointment_cooldown_minutes', 15),
         ]);
     }
 

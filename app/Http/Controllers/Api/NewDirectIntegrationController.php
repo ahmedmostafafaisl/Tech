@@ -2270,7 +2270,7 @@ class NewDirectIntegrationController extends Controller
             str_replace('done:', '', $lastAppointment->complete_v2_calling)
         );
 
-        $cooldownMinutes = (int) Setting::get('appointment_cooldown_minutes', 10);
+        $cooldownMinutes = (int) Setting::get('appointment_cooldown_minutes', 15);
 
         $secondsSinceDone = $doneAt->diffInSeconds(now());
         $totalSeconds = ($cooldownMinutes * 60) - $secondsSinceDone;
@@ -4431,18 +4431,40 @@ class NewDirectIntegrationController extends Controller
 
         $technicians = $this->dyService->getTechniciansByPrimaryWarehouse($mainWarehouseId);
 
-        // Exclude the authenticated user from the DY365 results too —
-        // matched by TechnicianRecId, since that's DY365's own identifier
-        // (compared against the local user's tech_id, which is populated
-        // from that same TechnicianRecId when technicians are synced).
-        $technicians = array_values(array_filter($technicians, function ($technician) use ($user) {
-            return ($technician['TechnicianRecId'] ?? null) != $user->tech_id;
+        // Find the AUTHENTICATED user's own entry within this same raw
+        // list (before exclusion) to get their TechnicianDepartment —
+        // this field only exists in the live DY365 response, it isn't
+        // stored on the local User model at all, so this filter can only
+        // apply here, not on the 'db' branch above.
+        $authTechnicianEntry = collect($technicians)->first(
+            fn($technician) => ($technician['TechnicianRecId'] ?? null) == $user->tech_id
+        );
+
+        $authDepartment = $authTechnicianEntry['TechnicianDepartment'] ?? null;
+
+        // Exclude the authenticated user from the results, and — when we
+        // could resolve their own department — keep only technicians in
+        // that SAME TechnicianDepartment too.
+        $technicians = array_values(array_filter($technicians, function ($technician) use ($user, $authDepartment) {
+            if (($technician['TechnicianRecId'] ?? null) == $user->tech_id) {
+                return false; // exclude self
+            }
+
+            if ($authDepartment !== null) {
+                return ($technician['TechnicianDepartment'] ?? null) === $authDepartment;
+            }
+
+            // Couldn't resolve the auth user's own department (e.g. they
+            // weren't found in this warehouse's list at all) — fall back
+            // to warehouse-only filtering rather than returning nothing.
+            return true;
         }));
 
         return response()->json([
             'status' => true,
             'source' => 'dy',
             'main_warehouse_id' => $mainWarehouseId,
+            'technician_department' => $authDepartment,
             'count' => count($technicians),
             'data' => $technicians,
         ]);
