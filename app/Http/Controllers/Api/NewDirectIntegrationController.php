@@ -550,7 +550,7 @@ class NewDirectIntegrationController extends Controller
             ->send();
     }
 
-    private function buildStockMapForSalesLines(array $salesLines, string $warehouseId): Collection
+    public function buildStockMapForSalesLines(array $salesLines, string $warehouseId): Collection
     {
         $itemNumbers = collect($salesLines)
             ->pluck('ItemNumber')
@@ -4283,9 +4283,8 @@ class NewDirectIntegrationController extends Controller
         ]);
     }
 
-    public function deleteAppointmentTransactionSerial(
-        SearchAppointmentTransactionSerialRequest $request
-    ) {
+    public function deleteAppointmentTransactionSerial(SearchAppointmentTransactionSerialRequest $request)
+    {
         $serial = trim($request->validated('serial'));
 
         $serialRows = AppointmentTransactionSerial::query()
@@ -4329,10 +4328,14 @@ class NewDirectIntegrationController extends Controller
             // is the real appointment status string on success.
             $status = $appointmentData['Status'] ?? null;
 
+            // Keep serials for appointments that are Completed, or still
+            // legitimately active/pending (Delayed, Scheduled) — only
+            // delete for anything else (Cancelled, unrecognized statuses)
+            // or genuinely not found.
             $shouldDelete = $appointmentData === null
                 || $status === null
                 || $status === false
-                || $status !== 'Completed';
+                || !in_array($status, ['Completed', 'Delayed', 'Scheduled'], true);
 
             if ($shouldDelete) {
                 Log::info('Deleting stale appointment transaction serial.', [
@@ -4353,14 +4356,14 @@ class NewDirectIntegrationController extends Controller
                     'id' => $serialRow->id,
                     'book_id' => $bookId,
                     'status' => $status,
-                    'message' => 'The appointment status is Completed — cannot delete this serial.',
+                    'message' => "The appointment status is {$status} — cannot delete this serial.",
                 ];
             }
         }
 
         $topLevelMessage = match (true) {
             count($deleted) > 0 && count($kept) === 0 => count($deleted) === 1 ? 'Serial deleted.' : 'Serials deleted.',
-            count($deleted) === 0 && count($kept) > 0 => 'Nothing deleted — all matching serials belong to Completed appointments (or have no resolvable book_id).',
+            count($deleted) === 0 && count($kept) > 0 => 'Nothing deleted — all matching serials belong to Completed/Delayed/Scheduled appointments (or have no resolvable book_id).',
             default => 'Cleanup completed — some serials deleted, some kept.',
         };
 

@@ -58,6 +58,18 @@ class PaymentCompletionDispatcher
             return $validation;
         }
 
+        // ✅ Stock validation — was previously ONLY enforced upstream in
+        // sendPaymentLinks()/completeAppointment() (via
+        // salesLinesSummaryByBookId()), meaning any other caller of
+        // dispatch()/preCheck() (a retry job, an admin action, etc.) had
+        // zero stock enforcement of its own. Now checked here directly,
+        // so this service is self-contained rather than trusting callers
+        // to have already validated it.
+        $stockValidation = $this->validateStockAvailability($appointment, $appointmentData);
+        if ($stockValidation !== null) {
+            return $stockValidation;
+        }
+
         // 2) lock marker (with stale running unlock)
         $marker = (string) ($appointment->complete_v2_calling ?? '');
 
@@ -416,6 +428,82 @@ class PaymentCompletionDispatcher
     }
 
     /**
+     * Stock validation — same logic as
+     * NewDirectIntegrationController::salesLinesSummaryByBookId(), reused
+     * via buildStockMapForSalesLines() rather than duplicated, but sourced
+     * from the technician's own record (getTechnicianUser($appointment->tech_id))
+     * instead of Auth::user(), since this service can run outside an
+     * authenticated HTTP request (a queued job, an admin action, etc.).
+     *
+     * Filters out service-type lines (OrderTypeId === 'خدمات') the same
+     * way the controller version does, then flags any remaining line
+     * where the technician's warehouse has zero or insufficient quantity
+     * for what the appointment requires.
+     *
+     * Returns null when valid, or ['ok' => false, ...] to return
+     * immediately when stock is insufficient — same convention as
+     * validateInstallmentStatusItems().
+     */
+    protected function validateStockAvailability(DirectAppointment $appointment, array $appointmentData): ?array
+    {
+        $salesLines = $appointmentData['sales_lines'] ?? [];
+
+        if (empty($salesLines)) {
+            // Nothing to check — the free-appointment / db_fallback paths
+            // already handle an empty sales_lines case elsewhere.
+            return null;
+        }
+
+        $technicianUser = app(NewDirectIntegrationController::class)
+            ->getTechnicianUser((string) $appointment->tech_id);
+
+        if (!$technicianUser || empty($technicianUser->warehouse_id)) {
+            Log::warning('Stock validation skipped — technician or warehouse_id not found.', [
+                'appointment_id' => $appointment->id,
+                'tech_id'        => $appointment->tech_id,
+            ]);
+
+            return null; // can't validate without a warehouse — don't block on missing data
+        }
+
+        $nonServiceLines = array_values(array_filter($salesLines, function ($line) {
+            return ($line['OrderTypeId'] ?? null) !== 'خدمات';
+        }));
+
+        if (empty($nonServiceLines)) {
+            return null; // all lines are services — nothing physical to check stock for
+        }
+
+        $stockMap = app(NewDirectIntegrationController::class)
+            ->buildStockMapForSalesLines($nonServiceLines, $technicianUser->warehouse_id);
+
+        $zeroStockLines = array_values(array_filter(
+            array_map(function ($line) use ($stockMap) {
+                $itemNumber   = strtolower($line['ItemNumber'] ?? '');
+                $maxQuantity  = $stockMap->get($itemNumber)['Quantity'] ?? 0;
+                $lineQuantity = $line['Quantity'] ?? 0;
+
+                return [
+                    'item_number'  => $line['ItemNumber'] ?? null,
+                    'quantity'     => $lineQuantity,
+                    'max_quantity' => $maxQuantity,
+                ];
+            }, $nonServiceLines),
+            fn($line) => $line['max_quantity'] === 0 || $line['max_quantity'] < $line['quantity']
+        ));
+
+        if (!empty($zeroStockLines)) {
+            return [
+                'ok'     => false,
+                'reason' => 'insufficient_stock',
+                'detail' => $zeroStockLines,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
      * Validates whether the appointment is eligible for completion dispatch.
      * Runs the same idempotency + lock + pre-check logic as dispatch()
      * but WITHOUT writing any markers or firing the command.
@@ -454,6 +542,12 @@ class PaymentCompletionDispatcher
         $validation = $this->validateInstallmentStatusItems($appointment, $appointmentData);
         if ($validation !== null) {
             return $validation;
+        }
+
+        // Same stock check as dispatch() — kept in sync via the shared helper.
+        $stockValidation = $this->validateStockAvailability($appointment, $appointmentData);
+        if ($stockValidation !== null) {
+            return $stockValidation;
         }
 
         // ── Check lock marker ─────────────────────────────────────────────
