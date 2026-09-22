@@ -70,6 +70,22 @@ class PaymentCompletionDispatcher
             return $stockValidation;
         }
 
+        // ✅ Cooldown — same rule as sendPaymentLinks()/completeAppointment():
+        // don't proceed until 15 minutes have passed since the
+        // technician's previous appointment, unless the most recent one
+        // IS this same appointment.
+        $cooldownRemaining = app(NewDirectIntegrationController::class)
+            ->getRemainingCooldownMinutes($appointment->tech_id, $appointment->book_id);
+
+        if (!(is_null($cooldownRemaining) || $cooldownRemaining === 0)) {
+            return [
+                'ok'     => false,
+                'reason' => 'cooldown_active',
+                'detail' => 'Please wait before sending another appointment to Dynamics.',
+                'timer'  => $cooldownRemaining,
+            ];
+        }
+
         // 2) lock marker (with stale running unlock)
         $marker = (string) ($appointment->complete_v2_calling ?? '');
 
@@ -548,6 +564,20 @@ class PaymentCompletionDispatcher
         $stockValidation = $this->validateStockAvailability($appointment, $appointmentData);
         if ($stockValidation !== null) {
             return $stockValidation;
+        }
+
+        // Same cooldown check as dispatch() — kept in sync since this
+        // method exists specifically to predict dispatch()'s outcome.
+        $cooldownRemaining = app(NewDirectIntegrationController::class)
+            ->getRemainingCooldownMinutes($appointment->tech_id, $appointment->book_id);
+
+        if (!(is_null($cooldownRemaining) || $cooldownRemaining === 0)) {
+            return [
+                'ok'     => false,
+                'reason' => 'cooldown_active',
+                'detail' => 'Please wait before sending another appointment to Dynamics.',
+                'timer'  => $cooldownRemaining,
+            ];
         }
 
         // ── Check lock marker ─────────────────────────────────────────────

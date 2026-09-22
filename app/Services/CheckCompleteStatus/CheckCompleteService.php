@@ -182,7 +182,21 @@ class CheckCompleteService
                 if ($paymentTypeLower === 'tamara') {
                     $allowedStatuses = ['approved', 'authorised', 'fully_captured'];
 
-                    $response = app('App\Services\Payment\TamaraService')->getOrderStatus($payment->payment_id);
+                    try {
+                        $response = app('App\Services\Payment\TamaraService')->getOrderStatus($payment->payment_id);
+                    } catch (\Throwable $e) {
+                        // A failed lookup (e.g. an invalid/blank stored
+                        // payment_id) isn't proof of a duplicate — treat
+                        // it as "not verified" and let the request
+                        // continue, rather than crashing the whole call.
+                        \Illuminate\Support\Facades\Log::warning('Tamara duplicate-check lookup failed.', [
+                            'payment_id'   => $payment->payment_id,
+                            'reference_id' => $payment->reference_id,
+                            'error'        => $e->getMessage(),
+                        ]);
+                        continue;
+                    }
+
                     // Check if status indicates an active/approved payment
                     if (isset($response['status']) && in_array(strtolower($response['status']), $allowedStatuses)) {
                         $payment->status = 'paid';
@@ -195,8 +209,23 @@ class CheckCompleteService
                 } else if ($paymentTypeLower === 'tabby' || $paymentTypeLower === 'tabi') {
                     $allowedStatuses = ['AUTHORIZED', 'CLOSED', 'CAPTURED'];
 
-                    $response = app(\App\Services\Payment\TabbyService::class)
-                        ->retrieveTabbyPayment($payment->payment_id);
+                    try {
+                        $response = app(\App\Services\Payment\TabbyService::class)
+                            ->retrieveTabbyPayment($payment->payment_id);
+                    } catch (\Throwable $e) {
+                        // Same reasoning as the Tamara branch above — this
+                        // is the exact bug that was crashing sendPaymentLinks()
+                        // with a 500 whenever a stored payment_id didn't
+                        // correspond to a real Tabby payment (e.g. HTTP
+                        // 404 "no such payment").
+                        \Illuminate\Support\Facades\Log::warning('Tabby duplicate-check lookup failed.', [
+                            'payment_id'   => $payment->payment_id,
+                            'reference_id' => $payment->reference_id,
+                            'error'        => $e->getMessage(),
+                        ]);
+                        continue;
+                    }
+
                     // Check if status indicates an active/approved payment
                     if (is_array($response) && isset($response['status'])) {
 

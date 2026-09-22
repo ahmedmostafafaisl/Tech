@@ -30,6 +30,15 @@ class Invoice2Controller extends Controller
 
         $firstPayment = $orderPayments[0] ?? [];
 
+        // All payments, not just the first — the payment table needs to
+        // show every OrderPayments entry (e.g. split POS + CASH), not
+        // only the first one.
+        $allPayments = collect($orderPayments)->map(fn($payment) => [
+            'mode'  => $payment['PaymentMethod'] ?? '-',
+            'ref'   => $payment['PaymentReference'] ?? '-',
+            'value' => (float) ($payment['Amount'] ?? 0),
+        ])->values()->toArray();
+
         $invoiceDate = !empty($data['InvoiceDate'])
             ? Carbon::parse($data['InvoiceDate'])->format('Y-m-d')
             : now()->format('Y-m-d');
@@ -63,6 +72,7 @@ class Invoice2Controller extends Controller
                 'ref'   => $firstPayment['PaymentReference'] ?? '-',
                 'value' => (float) ($firstPayment['Amount'] ?? ($data['Amount'] ?? 0)),
             ],
+            'payments' => $allPayments,
             'company' => array_merge([
                 'address' => '-',
                 'city'    => '-',

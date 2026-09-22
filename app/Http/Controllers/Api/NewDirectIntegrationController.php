@@ -1626,6 +1626,18 @@ class NewDirectIntegrationController extends Controller
             return $stockCheck; // returns the 400 error response
         }
 
+        // 0b) Cooldown: don't send to Dynamics until 15 minutes have
+        // passed since the technician's previous appointment was sent —
+        // unless the most recent one IS this same appointment.
+        $cooldownRemaining = $this->getRemainingCooldownMinutes($tech_id, $book_id);
+        if (!(is_null($cooldownRemaining) || $cooldownRemaining === 0)) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Please wait before sending another appointment to Dynamics.',
+                'timer'   => $cooldownRemaining,
+            ], 429);
+        }
+
         // 1) authorize technician
         try {
             if (! $user) {
@@ -2255,12 +2267,26 @@ class NewDirectIntegrationController extends Controller
         return response()->json(['status' => 'not_found', 'timer' => $remaining]);
     }
 
-    private function getRemainingCooldownMinutes(): ?int
+    public function getRemainingCooldownMinutes(?int $techId = null, ?string $excludeBookId = null): ?int
     {
-        $lastAppointment = DirectAppointment::where('tech_id', auth()->user()->tech_id)
-            ->where('complete_v2_calling', 'like', 'done:%')
-            ->latest('updated_at')
-            ->first();
+        $techId = $techId ?? auth()->user()?->tech_id;
+
+        if (!$techId) {
+            return null;
+        }
+
+        $query = DirectAppointment::where('tech_id', $techId)
+            ->where('complete_v2_calling', 'like', 'done:%');
+
+        // "or until the number registered in the database is used" — if
+        // the technician's most recent completed appointment IS the
+        // current one being processed, don't let it count against
+        // itself; look for the next most recent genuinely different one.
+        if ($excludeBookId) {
+            $query->where('book_id', '!=', $excludeBookId);
+        }
+
+        $lastAppointment = $query->latest('updated_at')->first();
 
         if (! $lastAppointment) {
             return null;
@@ -2442,6 +2468,19 @@ class NewDirectIntegrationController extends Controller
         $stockCheck = $this->salesLinesSummaryByBookId($book_id);
         if ($stockCheck !== null) {
             return $stockCheck; // returns the 400 error response
+        }
+
+        // 0b) Cooldown: same rule as sendPaymentLinks() — don't send to
+        // Dynamics until 15 minutes have passed since the technician's
+        // previous appointment, unless the most recent one IS this same
+        // appointment.
+        $cooldownRemaining = $this->getRemainingCooldownMinutes($tech_id, $book_id);
+        if (!(is_null($cooldownRemaining) || $cooldownRemaining === 0)) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Please wait before sending another appointment to Dynamics.',
+                'timer'   => $cooldownRemaining,
+            ], 429);
         }
 
         try {
