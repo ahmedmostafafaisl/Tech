@@ -4579,25 +4579,37 @@ class NewDirectIntegrationController extends Controller
         }
 
         $paymentsCount = $appointment->payments()->count();
+        $attachmentsCount = $appointment->attachments()->count();
+        $completeFormCount = $appointment->completeForm()->count();
+        $submissionFormCount = $appointment->submissionForm()->count();
 
         DB::transaction(function () use ($appointment) {
             $appointment->payments()->delete();
+            $appointment->attachments()->delete();
+            $appointment->completeForm()->delete();
+            $appointment->submissionForm()->delete();
             $appointment->delete();
         });
 
-        Log::info('Deleted direct appointment and its payments.', [
+        Log::info('Deleted direct appointment, its payments, attachments, completeForm and submissionForm.', [
             'book_id' => $bookId,
             'appointment_id' => $appointment->id,
             'payments_deleted' => $paymentsCount,
+            'attachments_deleted' => $attachmentsCount,
+            'complete_form_deleted' => $completeFormCount,
+            'submission_form_deleted' => $submissionFormCount,
             'user_id' => auth()->id(),
         ]);
 
         return response()->json([
             'status' => true,
-            'message' => 'Direct appointment and its payments deleted successfully.',
+            'message' => 'Direct appointment and its related records deleted successfully.',
             'deleted' => [
                 'appointment_id' => $appointment->id,
                 'payments_deleted' => $paymentsCount,
+                'attachments_deleted' => $attachmentsCount,
+                'complete_form_deleted' => $completeFormCount,
+                'submission_form_deleted' => $submissionFormCount,
             ],
         ]);
     }

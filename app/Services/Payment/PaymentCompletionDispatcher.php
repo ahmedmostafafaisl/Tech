@@ -215,7 +215,7 @@ class PaymentCompletionDispatcher
                 'InstalltionStatus' => $installmentStatus,
             ], $serialPayload),
         ];
-        // dd($appointment, $body);
+
         if (!empty($extraBody)) {
             $body = array_replace_recursive($body, $extraBody);
             $body['_contract']['Discount'] = (float) ($appointment->discount ?? 0);
