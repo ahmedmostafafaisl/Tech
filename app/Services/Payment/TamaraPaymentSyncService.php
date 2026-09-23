@@ -171,7 +171,7 @@ class TamaraPaymentSyncService
 
             $dyRequiredAmount = (float) ($appointmentData['required_amount'] ?? $required);
             $paidAmount       = (float) ($appointmentData['PaidAmount'] ?? 0);
-            $usedBalance      = (float) ($appointmentData['used_balance'] ?? 0);
+            $usedBalance      = abs((float) ($appointmentData['used_balance'] ?? 0));
 
             $required = app(RequiredAmountCalculator::class)
                 ->calculate($dyRequiredAmount, $paidAmount, $usedBalance);

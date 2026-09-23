@@ -413,7 +413,7 @@ class NewDirectIntegrationController extends Controller
         if (Setting::isActive('new_required_amount_calculation_active')) {
             $requiredAmount = (float) ($appointment['RequiredAmount'] ?? 0);
             $paidAmount = (float) ($appointment['PaidAmount'] ?? 0);
-            $usedBalance = (float) ($appointment['UsedBalance'] ?? 0);
+            $usedBalance = abs((float) ($appointment['UsedBalance'] ?? 0));
 
             $appointment['RequiredAmount'] = app(RequiredAmountCalculator::class)
                 ->calculate($requiredAmount, $paidAmount, $usedBalance);
@@ -1711,7 +1711,7 @@ class NewDirectIntegrationController extends Controller
             // duplicate this formula elsewhere; reuse this same class.
             if (Setting::isActive('new_required_amount_calculation_active')) {
                 $paidAmount = (float) ($singleAppointment['PaidAmount'] ?? 0);
-                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+                $usedBalance = abs((float) ($singleAppointment['used_balance'] ?? 0));
 
                 $required_amount = app(RequiredAmountCalculator::class)
                     ->calculate($required_amount, $paidAmount, $usedBalance);
@@ -2172,7 +2172,7 @@ class NewDirectIntegrationController extends Controller
             // should be treated the same as required_amount == 0.
             if (Setting::isActive('new_required_amount_calculation_active')) {
                 $paidAmount = (float) ($singleAppointment['PaidAmount'] ?? 0);
-                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+                $usedBalance =  abs((float) ($singleAppointment['used_balance'] ?? 0));
 
                 $required_amount = app(RequiredAmountCalculator::class)
                     ->calculate($required_amount, $paidAmount, $usedBalance);
@@ -2569,7 +2569,7 @@ class NewDirectIntegrationController extends Controller
             // below, even though nothing is actually still owed.
             if (Setting::isActive('new_required_amount_calculation_active')) {
                 $paidAmount = (float) ($singleAppointment['PaidAmount'] ?? 0);
-                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+                $usedBalance = abs((float) ($singleAppointment['used_balance'] ?? 0));
 
                 $required_amount = app(RequiredAmountCalculator::class)
                     ->calculate($required_amount, $paidAmount, $usedBalance);
@@ -3729,7 +3729,7 @@ class NewDirectIntegrationController extends Controller
             'book_id' => $data['BookId'] ?? null,
             'Worker' => $data['Worker'] ?? null,
             'Status' => $data['Status'] ?? null,
-            'used_balance' => $data['UsedBalance'] ?? 0,
+            'used_balance' => abs((float) ($data['UsedBalance'] ?? 0)),
             'sales_lines' => $salesLines,
         ];
     }

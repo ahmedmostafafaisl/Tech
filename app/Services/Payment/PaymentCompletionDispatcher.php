@@ -34,7 +34,7 @@ class PaymentCompletionDispatcher
         // required_amount's own existing fallback.
         if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
             $paidAmount  = (float) ($appointmentData['PaidAmount'] ?? 0);
-            $usedBalance = (float) ($appointmentData['used_balance'] ?? 0);
+            $usedBalance = abs((float) ($appointmentData['used_balance'] ?? 0));
 
             $required = app(\App\Services\Payment\RequiredAmountCalculator::class)
                 ->calculate($required, $paidAmount, $usedBalance);
@@ -197,7 +197,7 @@ class PaymentCompletionDispatcher
         $usedBalanceApplied = app(RequiredAmountCalculator::class)->calculateUsedBalanceApplied(
             $rawRequiredAmount,
             $paidAmountForBody,
-            (float) ($appointmentData['used_balance'] ?? 0)
+            abs((float) ($appointmentData['used_balance'] ?? 0))
         );
 
         $body = [
@@ -572,7 +572,7 @@ class PaymentCompletionDispatcher
         // method exists specifically to predict dispatch()'s outcome.
         if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
             $paidAmount  = (float) ($appointmentData['PaidAmount'] ?? 0);
-            $usedBalance = (float) ($appointmentData['used_balance'] ?? 0);
+            $usedBalance = abs((float) ($appointmentData['used_balance'] ?? 0));
 
             $required = app(\App\Services\Payment\RequiredAmountCalculator::class)
                 ->calculate($required, $paidAmount, $usedBalance);
