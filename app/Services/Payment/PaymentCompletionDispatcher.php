@@ -206,7 +206,7 @@ class PaymentCompletionDispatcher
                 'SalesOrderId'      => $appointment->sales_order_id,
                 'BookId'            => $appointment->book_id,
                 'Discount'          => (float) ($appointment->discount ?? 0),
-                // 'PaidAmount'        => $paidAmountForBody,
+                'PaidAmount'        => $paidAmountForBody,
                 'UsedBalance'       => $usedBalanceApplied ?? 0,
                 'SalesLines'        => $salesLines,
                 // ⚠ FIXED (again — this reverted back to the typo in a

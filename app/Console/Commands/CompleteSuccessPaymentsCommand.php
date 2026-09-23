@@ -153,6 +153,22 @@ class CompleteSuccessPaymentsCommand extends Command
 
             $requiredAmount = (float) $requiredAmount;
 
+            // ✅ Same shared calculator/flag as sendPaymentLinks/completeAppointment/
+            // checkPaymentStatus/PaymentCompletionDispatcher/checkPayments() —
+            // this was a SECOND, independent place (separate from
+            // CheckCompleteService::checkPayments(), already fixed) that
+            // still compared against the RAW DY365 value instead of the
+            // correctly-calculated one, causing the exact same false
+            // "Amount mismatch" for any appointment where PaidAmount/
+            // used_balance actually reduced what's owed.
+            if (\App\Models\Setting::isActive('new_required_amount_calculation_active')) {
+                $paidAmount  = (float) ($singleAppointment['PaidAmount'] ?? 0);
+                $usedBalance = (float) ($singleAppointment['used_balance'] ?? 0);
+
+                $requiredAmount = app(\App\Services\Payment\RequiredAmountCalculator::class)
+                    ->calculate($requiredAmount, $paidAmount, $usedBalance);
+            }
+
             /**
              * 🟢 Step 2: Calculate amount
              */
