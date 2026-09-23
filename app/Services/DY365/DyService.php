@@ -93,14 +93,14 @@ class DyService
         $this->smsService = $smsService;
         if ($this->environment == 'test') {
 
-            // $this->baseUrl = "https://hamat-uat.sandbox.operations.eu.dynamics.com";
+            $this->baseUrl = "https://hamat-uat.sandbox.operations.eu.dynamics.com";
             // $this->baseUrl = "https://naqi-dev05d11a9e2701c26003devaos.axcloud.dynamics.com";
             // $this->baseUrl = "https://naqi-dev0614ec34becbf5112bdevaos.axcloud.dynamics.com";
             // $this->baseUrl = "https://naqi-dev07e0d2be09243f5188devaos.axcloud.dynamics.com";
             // $this->baseUrl = "https://naqi-dev10f17f23242541dcafdevaos.axcloud.dynamics.com";
             // $this->baseUrl = "https://hamat-uat02.sandbox.operations.eu.dynamics.com";
 
-            $this->baseUrl = "https://hamat-prod.operations.eu.dynamics.com";
+            // $this->baseUrl = "https://hamat-prod.operations.eu.dynamics.com";
             $this->tokenUrl = "https://login.microsoftonline.com/015ce0d4-cd51-4914-9ada-bdaff52b5c3d/oauth2/token";
             $this->clientId = config('services.dy365.client_id', '');
             $this->clientSecret = config('services.dy365.client_secret', '');

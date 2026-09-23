@@ -70,6 +70,13 @@ class PaymentCompletionDispatcher
             return $stockValidation;
         }
 
+        // ✅ naqi-s00004 exclusivity — unconditional, applies regardless
+        // of order_type or InstallmentStatus.
+        $itemExclusivityValidation = $this->validateItemExclusivity($appointmentData);
+        if ($itemExclusivityValidation !== null) {
+            return $itemExclusivityValidation;
+        }
+
         // ✅ Cooldown — same rule as sendPaymentLinks()/completeAppointment():
         // don't proceed until 15 minutes have passed since the
         // technician's previous appointment, unless the most recent one
@@ -520,6 +527,31 @@ class PaymentCompletionDispatcher
     }
 
     /**
+     * naqi-s00004 must be kept entirely separate — if present, it cannot
+     * be combined with any other products, regardless of order_type or
+     * InstallmentStatus. Unconditional, unlike validateInstallmentStatusItems()
+     * which is gated to تركيب/منتجات only.
+     */
+    protected function validateItemExclusivity(array $appointmentData): ?array
+    {
+        $salesLines = collect($appointmentData['sales_lines'] ?? []);
+
+        $hasNaqiS00004 = $salesLines->contains(
+            fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
+        );
+
+        if ($hasNaqiS00004 && $salesLines->count() !== 1) {
+            return [
+                'ok'     => false,
+                'reason' => 'item_exclusivity_violation',
+                'detail' => 'item_exclusivity_validation(naqi-s00004)',
+            ];
+        }
+
+        return null;
+    }
+
+    /**
      * Validates whether the appointment is eligible for completion dispatch.
      * Runs the same idempotency + lock + pre-check logic as dispatch()
      * but WITHOUT writing any markers or firing the command.
@@ -564,6 +596,12 @@ class PaymentCompletionDispatcher
         $stockValidation = $this->validateStockAvailability($appointment, $appointmentData);
         if ($stockValidation !== null) {
             return $stockValidation;
+        }
+
+        // Same item-exclusivity check as dispatch().
+        $itemExclusivityValidation = $this->validateItemExclusivity($appointmentData);
+        if ($itemExclusivityValidation !== null) {
+            return $itemExclusivityValidation;
         }
 
         // Same cooldown check as dispatch() — kept in sync since this
