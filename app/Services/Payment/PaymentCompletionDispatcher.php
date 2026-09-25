@@ -366,6 +366,11 @@ class PaymentCompletionDispatcher
         $hasDlvFee1 = collect($salesLines)->contains(
             fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
         );
+        // naqi-s00004 also satisfies the TotalAmountSum < 500 delivery-fee
+        // requirement below — error only fires when NEITHER item is present.
+        $hasNaqiS00004ForDeliveryCheck = collect($salesLines)->contains(
+            fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
+        );
 
         if ($installmentStatus === 'Need_installation') {
             $isValidSingleVisitLine =
@@ -406,7 +411,7 @@ class PaymentCompletionDispatcher
         $logService = app(\App\Services\Logs\TechnicianAppointmentLogService::class);
 
         if ($totalAmountSum < 500) {
-            if (!$hasFesTechVisit && !$hasDlvFee1) {
+            if (!$hasFesTechVisit && !$hasDlvFee1 && !$hasNaqiS00004ForDeliveryCheck) {
                 $logService->validationFailed(
                     techId: $appointment->tech_id,
                     action: 'payment_completion_dispatch',

@@ -1731,12 +1731,18 @@ class NewDirectIntegrationController extends Controller
                     fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
                 );
 
+                // naqi-s00004 also satisfies this requirement — error
+                // only fires when NEITHER item is present.
+                $hasNaqiS00004ForDeliveryCheck = $salesLinesForCheck->contains(
+                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
+                );
+
                 if ($totalAmountSum < 500) {
                     $isTechVisitOnly = $salesLinesForCheck->contains(
                         fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
                     );
 
-                    if (! $isTechVisitOnly && ! $hasDeliveryFee) {
+                    if (! $isTechVisitOnly && ! $hasDeliveryFee && ! $hasNaqiS00004ForDeliveryCheck) {
                         $logService->validationFailed(
                             techId: $tech_id,
                             action: 'send_payment_links',
@@ -2594,12 +2600,18 @@ class NewDirectIntegrationController extends Controller
                     fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
                 );
 
+                // naqi-s00004 also satisfies this requirement — error
+                // only fires when NEITHER item is present.
+                $hasNaqiS00004ForDeliveryCheck = $salesLinesForCheck->contains(
+                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
+                );
+
                 if ($totalAmountSum < 500) {
                     $isTechVisitOnly = $salesLinesForCheck->contains(
                         fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
                     );
 
-                    if (! $isTechVisitOnly && ! $hasDeliveryFee) {
+                    if (! $isTechVisitOnly && ! $hasDeliveryFee && ! $hasNaqiS00004ForDeliveryCheck) {
                         $logService->validationFailed(
                             techId: $tech_id,
                             action: 'send_payment_links',
