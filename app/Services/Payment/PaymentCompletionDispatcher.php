@@ -536,15 +536,21 @@ class PaymentCompletionDispatcher
     {
         $salesLines = collect($appointmentData['sales_lines'] ?? []);
 
+        // naqi-s00004 and fes-transportation must never be the ONLY two
+        // items together — if both are present with nothing else, reject.
+        // Either alone, or either alongside other items, is fine.
         $hasNaqiS00004 = $salesLines->contains(
             fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
         );
+        $hasFesTransportation = $salesLines->contains(
+            fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
+        );
 
-        if ($hasNaqiS00004 && $salesLines->count() !== 1) {
+        if ($hasNaqiS00004 && $hasFesTransportation && $salesLines->count() === 2) {
             return [
                 'ok'     => false,
                 'reason' => 'item_exclusivity_violation',
-                'detail' => 'item_exclusivity_validation(naqi-s00004)',
+                'detail' => 'item_exclusivity_validation(naqi-s00004,fes-transportation)',
             ];
         }
 

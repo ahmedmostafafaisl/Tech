@@ -1780,21 +1780,25 @@ class NewDirectIntegrationController extends Controller
                 }
             }
 
-            // ✅ naqi-s00004 must be kept entirely separate — if present,
-            // it cannot be combined with any other products, regardless
-            // of order_type or anything else. Checked against real
-            // DY365 sales_lines, not client-submitted items.
+            // ✅ naqi-s00004 and fes-transportation must never be the ONLY
+            // two items together — if both are present with nothing else,
+            // reject. Either alone, or either alongside other items, is
+            // fine. Checked against real DY365 sales_lines, not
+            // client-submitted items.
             $hasNaqiS00004 = $salesLinesForCheck->contains(
                 fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
             );
+            $hasFesTransportationForExclusivity = $salesLinesForCheck->contains(
+                fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
+            );
 
-            if ($hasNaqiS00004 && $salesLinesForCheck->count() !== 1) {
+            if ($hasNaqiS00004 && $hasFesTransportationForExclusivity && $salesLinesForCheck->count() === 2) {
                 $logService->validationFailed(
                     techId: $tech_id,
                     action: 'send_payment_links',
                     bookId: $book_id,
                     salesOrderId: $sales_order_id,
-                    message: 'naqi-s00004 must be kept separate from other products',
+                    message: 'naqi-s00004 and fes-transportation cannot be the only two items in the appointment',
                     requestPayload: $request->all(),
                     responsePayload: [
                         'sales_lines_count' => $salesLinesForCheck->count(),
@@ -1804,7 +1808,7 @@ class NewDirectIntegrationController extends Controller
 
                 return response()->json([
                     'status' => false,
-                    'message' => 'item_exclusivity_validation(naqi-s00004)',
+                    'message' => 'item_exclusivity_validation(naqi-s00004,fes-transportation)',
                 ], 400);
             }
 
@@ -2639,21 +2643,25 @@ class NewDirectIntegrationController extends Controller
                 }
             }
 
-            // ✅ naqi-s00004 must be kept entirely separate — if present,
-            // it cannot be combined with any other products, regardless
-            // of order_type or anything else. Checked against real
-            // DY365 sales_lines, not client-submitted items.
+            // ✅ naqi-s00004 and fes-transportation must never be the ONLY
+            // two items together — if both are present with nothing else,
+            // reject. Either alone, or either alongside other items, is
+            // fine. Checked against real DY365 sales_lines, not
+            // client-submitted items.
             $hasNaqiS00004 = $salesLinesForCheck->contains(
                 fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
             );
+            $hasFesTransportationForExclusivity = $salesLinesForCheck->contains(
+                fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
+            );
 
-            if ($hasNaqiS00004 && $salesLinesForCheck->count() !== 1) {
+            if ($hasNaqiS00004 && $hasFesTransportationForExclusivity && $salesLinesForCheck->count() === 2) {
                 $logService->validationFailed(
                     techId: $tech_id,
                     action: 'complete_appointment',
                     bookId: $book_id,
                     salesOrderId: $sales_order_id,
-                    message: 'naqi-s00004 must be kept separate from other products',
+                    message: 'naqi-s00004 and fes-transportation cannot be the only two items in the appointment',
                     requestPayload: $request->all(),
                     responsePayload: [
                         'sales_lines_count' => $salesLinesForCheck->count(),
@@ -2663,7 +2671,7 @@ class NewDirectIntegrationController extends Controller
 
                 return response()->json([
                     'status' => false,
-                    'message' => 'item_exclusivity_validation(naqi-s00004)',
+                    'message' => 'item_exclusivity_validation(naqi-s00004,fes-transportation)',
                 ], 400);
             }
 
