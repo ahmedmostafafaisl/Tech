@@ -15,9 +15,6 @@ use Illuminate\Http\Client\Response;
 
 class DyService
 {
-
-    private $environment = "test";
-    // private $environment = "prod";
     private $baseUrl;
     private $tokenUrl;
     private $clientSecret;
@@ -91,99 +88,67 @@ class DyService
     public function __construct(TaqnyatSmsService $smsService)
     {
         $this->smsService = $smsService;
-        if ($this->environment == 'test') {
+        // $this->baseUrl = "https://hamat-uat.sandbox.operations.eu.dynamics.com";
+        // $this->baseUrl = "https://naqi-dev05d11a9e2701c26003devaos.axcloud.dynamics.com";
+        // $this->baseUrl = "https://naqi-dev0614ec34becbf5112bdevaos.axcloud.dynamics.com";
+        // $this->baseUrl = "https://naqi-dev07e0d2be09243f5188devaos.axcloud.dynamics.com";
+        // $this->baseUrl = "https://naqi-dev10f17f23242541dcafdevaos.axcloud.dynamics.com";
+        // $this->baseUrl = "https://hamat-uat02.sandbox.operations.eu.dynamics.com";
 
-            // $this->baseUrl = "https://hamat-uat.sandbox.operations.eu.dynamics.com";
-            // $this->baseUrl = "https://naqi-dev05d11a9e2701c26003devaos.axcloud.dynamics.com";
-            // $this->baseUrl = "https://naqi-dev0614ec34becbf5112bdevaos.axcloud.dynamics.com";
-            // $this->baseUrl = "https://naqi-dev07e0d2be09243f5188devaos.axcloud.dynamics.com";
-            // $this->baseUrl = "https://naqi-dev10f17f23242541dcafdevaos.axcloud.dynamics.com";
-            // $this->baseUrl = "https://hamat-uat02.sandbox.operations.eu.dynamics.com";
-
-            $this->baseUrl = "https://hamat-prod.operations.eu.dynamics.com";
-            $this->tokenUrl = "https://login.microsoftonline.com/015ce0d4-cd51-4914-9ada-bdaff52b5c3d/oauth2/token";
-            $this->clientId = config('services.dy365.client_id', '');
-            $this->clientSecret = config('services.dy365.client_secret', '');
-            $this->getWarehouses = "/api/services/INDXIntTechGroupSvc/INDXIntTechWarehouseSvc/getWarehouses";
-            $this->getCategories = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProductCategories";
-            $this->paymentMethods = "/api/services/INDXIntTechGroupSvc/INDXIntTechPaymentMethodSvc/getPaymentMethods";
-            $this->getTechnicians = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getTechnicians";
-            $this->getSingleTechnician = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getSingleTechnician"; // new
-            $this->getCustomers = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/getCustomers";
-            $this->getTechnicianStock = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getTechnicianStockV2";
-            $this->getWarehouseStock = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getStockByWarehouseV3";
-            $this->getTechnicianTransfers = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/getTechnicianTransferOrders";
-            $this->getSingleTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/getSingleTechnicianTransferOrder"; // new
-            $this->createTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/createTransferOrder";
-            $this->updateTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/updateTransferOrderStatus";
-            $this->deleteTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/cancelTransferOrder"; // new
-            $this->getAppointments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getAppointments";
-            $this->getAppointmentBySalesOrderId = "/api/services/INDXIntTechGroupSvcV2/INDXIntTechAppointmentSvc/getAppointmentsBySalesOrderV2";
-            $this->getAppointmentByBookId = "/api/services/INDXIntTechGroupSvcV2/INDXIntTechAppointmentSvc/getAppointmentByBookId";
-            $this->getTechnicianAppointments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getTechnicianAppointments";
-            $this->changeAppointmentStatus = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/submitTechnicianChangeRequest";
-            $this->getTechnicianChangeStatusRequests = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getTechnicianChangeRequests";
-            $this->addSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/addSalesLinesToAppointment";
-            $this->updateSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateSalesLineForAppointment";
-            $this->deleteSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/deleteSalesLineForAppointment";
-            $this->successPayments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/completeAppointment";
-            $this->successPaymentsV2 = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/completeAppointmentV2";
-            $this->completeAppointmentAttachments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/addAppointmentAttachments";
-            $this->dyPaymentStatus = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updatePaymentLinkStatus";
-            $this->getOrCreateInvoice = "/api/services/INDXIntTechGroupSvc/INDXIntTechInvoiceSvc/getInvoiceBySalesOrderId";
-            $this->getOrCreateInvoiceByBookId = "/api/services/INDXIntTechGroupSvc/INDXIntTechInvoiceSvc/getInvoiceByBookId";
-            $this->salesHistory = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getSalesHistory"; // new
-            $this->customerChangeRequest = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateConfirmStatusCreateChangeRequest"; // new
-            $this->getCustomerChangeRequests = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getCustomerChangeRequests"; // new
-            // tech confirm  request
-            $this->techConfirmation = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateTechnicianConfirmation"; // new
-            $this->changeRequestReasons = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getRescheduleCancelReasons"; // new
-            $this->changeCustomerName = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/changeCustomerNameByAppointmentId"; // new
-            $this->addRegistrationNumber = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/addRegistrationByAppointmentId"; // new
-            $this->productLimit = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getTechnicianProductLimit"; // new
-            $this->getProducts = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProducts"; // new
-            $this->getBundleProducts = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProductsBundle"; // new
-            $this->getTechnicianDistributions = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getTechnicianDistributions"; // new
-            $this->updateCallListScore = "/api/services/INDXTeleSvcGrp/INDXTeleSvc/updateCallListTargetScore"; // new
+        $this->baseUrl = "https://hamat-prod.operations.eu.dynamics.com";
+        $this->tokenUrl = "https://login.microsoftonline.com/015ce0d4-cd51-4914-9ada-bdaff52b5c3d/oauth2/token";
+        $this->clientId = config('services.dy365.client_id', '');
+        $this->clientSecret = config('services.dy365.client_secret', '');
+        $this->getWarehouses = "/api/services/INDXIntTechGroupSvc/INDXIntTechWarehouseSvc/getWarehouses";
+        $this->getCategories = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProductCategories";
+        $this->paymentMethods = "/api/services/INDXIntTechGroupSvc/INDXIntTechPaymentMethodSvc/getPaymentMethods";
+        $this->getTechnicians = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getTechnicians";
+        $this->getSingleTechnician = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getSingleTechnician"; // new
+        $this->getCustomers = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/getCustomers";
+        $this->getTechnicianStock = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getTechnicianStockV2";
+        $this->getWarehouseStock = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getStockByWarehouseV3";
+        $this->getTechnicianTransfers = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/getTechnicianTransferOrders";
+        $this->getSingleTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/getSingleTechnicianTransferOrder"; // new
+        $this->createTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/createTransferOrder";
+        $this->updateTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/updateTransferOrderStatus";
+        $this->deleteTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/cancelTransferOrder"; // new
+        $this->getAppointments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getAppointments";
+        $this->getAppointmentBySalesOrderId = "/api/services/INDXIntTechGroupSvcV2/INDXIntTechAppointmentSvc/getAppointmentsBySalesOrderV2";
+        $this->getAppointmentByBookId = "/api/services/INDXIntTechGroupSvcV2/INDXIntTechAppointmentSvc/getAppointmentByBookId";
+        $this->getTechnicianAppointments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getTechnicianAppointments";
+        $this->changeAppointmentStatus = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/submitTechnicianChangeRequest";
+        $this->getTechnicianChangeStatusRequests = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getTechnicianChangeRequests";
+        $this->addSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/addSalesLinesToAppointment";
+        $this->updateSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateSalesLineForAppointment";
+        $this->deleteSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/deleteSalesLineForAppointment";
+        $this->successPayments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/completeAppointment";
+        $this->successPaymentsV2 = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/completeAppointmentV2";
+        $this->completeAppointmentAttachments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/addAppointmentAttachments";
+        $this->dyPaymentStatus = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updatePaymentLinkStatus";
+        $this->getOrCreateInvoice = "/api/services/INDXIntTechGroupSvc/INDXIntTechInvoiceSvc/getInvoiceBySalesOrderId";
+        $this->getOrCreateInvoiceByBookId = "/api/services/INDXIntTechGroupSvc/INDXIntTechInvoiceSvc/getInvoiceByBookId";
+        $this->salesHistory = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getSalesHistory"; // new
+        $this->customerChangeRequest = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateConfirmStatusCreateChangeRequest"; // new
+        $this->getCustomerChangeRequests = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getCustomerChangeRequests"; // new
+        // tech confirm  request
+        $this->techConfirmation = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateTechnicianConfirmation"; // new
+        $this->changeRequestReasons = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getRescheduleCancelReasons"; // new
+        $this->changeCustomerName = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/changeCustomerNameByAppointmentId"; // new
+        $this->addRegistrationNumber = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/addRegistrationByAppointmentId"; // new
+        $this->productLimit = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getTechnicianProductLimit"; // new
+        $this->getProducts = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProducts"; // new
+        $this->getBundleProducts = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProductsBundle"; // new
+        $this->getTechnicianDistributions = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getTechnicianDistributions"; // new
+        $this->updateCallListScore = "/api/services/INDXTeleSvcGrp/INDXTeleSvc/updateCallListTargetScore"; // new
 
 
 
 
-            $this->storeCustomer = "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_CustomersService/CreateUpdateCustomer";
-            $this->getItems = "https://hamat-prod.operations.eu.dynamics.com/data/TMK_ItemDetailsEntity";
-            $this->salesOrder =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_SalesOrderService/createSalesTransactions";
-            $this->customerPayment =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_CustPaymService/CreateCustomerPayment";
-            $this->getInvoiceDetails =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_SalesOrderService/GetInvoiceDetails";
-        } else {
-            $this->baseUrl = "https://hamat-prod.operations.eu.dynamics.com/";
-            $this->tokenUrl = "https://login.microsoftonline.com/015ce0d4-cd51-4914-9ada-bdaff52b5c3d/oauth2/token";
-            $this->clientId = config('services.dy365.client_id', '');
-            $this->clientSecret = config('services.dy365.client_secret', '');
-            $this->getWarehouses = "/api/services/INDXIntTechGroupSvc/INDXIntTechWarehouseSvc/getWarehouses";
-            $this->getCategories = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getProductCategories";
-            $this->paymentMethods = "/api/services/INDXIntTechGroupSvc/INDXIntTechPaymentMethodSvc/getPaymentMethods";
-            $this->getTechnicians = "/api/services/INDXIntTechGroupSvc/INDXIntTechTechnicianSvc/getTechnicians";
-            $this->getCustomers = "/api/services/INDXIntTechGroupSvc/INDXIntTechCustomerSvc/getCustomers";
-            $this->getTechnicianStock = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getTechnicianStock";
-            $this->getWarehouseStock = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getStockByWarehouse";
-            $this->getTechnicianTransfers = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/getTechnicianTransferOrders";
-            $this->createTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/createTransferOrder";
-            $this->updateTransferOrder = "/api/services/INDXIntTechGroupSvc/INDXIntTechTransferOrderSvc/updateTransferOrderStatus";
-            $this->getAppointments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getAppointments";
-            $this->getAppointmentBySalesOrderId = "/api/services/INDXIntTechGroupSvcV2/INDXIntTechAppointmentSvc/getAppointmentsBySalesOrder";
-            $this->getTechnicianAppointments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getTechnicianAppointments";
-            $this->changeAppointmentStatus = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/submitTechnicianChangeRequest";
-            $this->getTechnicianChangeStatusRequests = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getTechnicianChangeRequests";
-            $this->addSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/addSalesLinesToAppointment";
-            $this->updateSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updateSalesLineForAppointment";
-            $this->deleteSalesLine = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/deleteSalesLineForAppointment";
-            $this->successPayments = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/completeAppointment";
-            $this->dyPaymentStatus = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/updatePaymentLinkStatus";
-            $this->getOrCreateInvoice = "/api/services/INDXIntTechGroupSvc/INDXIntTechInvoiceSvc/getInvoiceBySalesOrderId";
-            $this->salesHistory = "/api/services/INDXIntTechGroupSvc/INDXIntTechProductSvc/getSalesHistory"; // new
-            $this->customerChangeRequest = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/submitCustomerChangeRequest"; // new
-            $this->getCustomerChangeRequests = "/api/services/INDXIntTechGroupSvc/INDXIntTechAppointmentSvc/getCustomerChangeRequests"; // new
-        }
+        $this->storeCustomer = "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_CustomersService/CreateUpdateCustomer";
+        $this->getItems = "https://hamat-prod.operations.eu.dynamics.com/data/TMK_ItemDetailsEntity";
+        $this->salesOrder =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_SalesOrderService/createSalesTransactions";
+        $this->customerPayment =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_CustPaymService/CreateCustomerPayment";
+        $this->getInvoiceDetails =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_SalesOrderService/GetInvoiceDetails";
     }
 
 
