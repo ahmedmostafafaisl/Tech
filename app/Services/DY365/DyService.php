@@ -2,16 +2,17 @@
 
 namespace App\Services\DY365;
 
-use App\Services\TaqnyatSmsService;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
+use App\Models\DyEnvironment;
+use App\Services\Payment\ClickPayService;
 use App\Services\Payment\TabbyService;
 use App\Services\Payment\TamaraService;
-use App\Services\Payment\ClickPayService;
+use App\Services\TaqnyatSmsService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class DyService
 {
@@ -88,14 +89,9 @@ class DyService
     public function __construct(TaqnyatSmsService $smsService)
     {
         $this->smsService = $smsService;
-        // $this->baseUrl = "https://hamat-uat.sandbox.operations.eu.dynamics.com";
-        // $this->baseUrl = "https://naqi-dev05d11a9e2701c26003devaos.axcloud.dynamics.com";
-        // $this->baseUrl = "https://naqi-dev0614ec34becbf5112bdevaos.axcloud.dynamics.com";
-        // $this->baseUrl = "https://naqi-dev07e0d2be09243f5188devaos.axcloud.dynamics.com";
-        // $this->baseUrl = "https://naqi-dev10f17f23242541dcafdevaos.axcloud.dynamics.com";
-        // $this->baseUrl = "https://hamat-uat02.sandbox.operations.eu.dynamics.com";
 
-        $this->baseUrl = "https://hamat-prod.operations.eu.dynamics.com";
+        $this->baseUrl = DyEnvironment::getDefaultUrl();
+
         $this->tokenUrl = "https://login.microsoftonline.com/015ce0d4-cd51-4914-9ada-bdaff52b5c3d/oauth2/token";
         $this->clientId = config('services.dy365.client_id', '');
         $this->clientSecret = config('services.dy365.client_secret', '');
@@ -144,11 +140,15 @@ class DyService
 
 
 
-        $this->storeCustomer = "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_CustomersService/CreateUpdateCustomer";
-        $this->getItems = "https://hamat-prod.operations.eu.dynamics.com/data/TMK_ItemDetailsEntity";
-        $this->salesOrder =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_SalesOrderService/createSalesTransactions";
-        $this->customerPayment =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_CustPaymService/CreateCustomerPayment";
-        $this->getInvoiceDetails =  "https://hamat-prod.operations.eu.dynamics.com/api/services/TMK_CRMServGrp/TMK_SalesOrderService/GetInvoiceDetails";
+        // ⚠ FIXED: these 5 previously had "https://hamat-prod..." baked
+        // directly into the string, bypassing $this->baseUrl entirely —
+        // meaning switching environments via DyEnvironment::switchTo()
+        // would have had no effect on these specific endpoints at all.
+        $this->storeCustomer = $this->baseUrl . "/api/services/TMK_CRMServGrp/TMK_CustomersService/CreateUpdateCustomer";
+        $this->getItems = $this->baseUrl . "/data/TMK_ItemDetailsEntity";
+        $this->salesOrder = $this->baseUrl . "/api/services/TMK_CRMServGrp/TMK_SalesOrderService/createSalesTransactions";
+        $this->customerPayment = $this->baseUrl . "/api/services/TMK_CRMServGrp/TMK_CustPaymService/CreateCustomerPayment";
+        $this->getInvoiceDetails = $this->baseUrl . "/api/services/TMK_CRMServGrp/TMK_SalesOrderService/GetInvoiceDetails";
     }
 
 
