@@ -2215,13 +2215,7 @@ class NewDirectIntegrationController extends Controller
                     ->withCount(['payments as paid_payments_count' => function ($q) {
                         $q->where('status', 'paid');
                     }])
-                    ->where(function ($q) use ($book_id, $sales_order_id) {
-                        $q->where('book_id', $book_id);
-
-                        if (! empty($sales_order_id)) {
-                            $q->orWhere('sales_order_id', $sales_order_id);
-                        }
-                    })
+                    ->where('book_id', $book_id)
                     ->orderByDesc('id')
                     ->first();
             }
