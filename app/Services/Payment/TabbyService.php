@@ -369,7 +369,15 @@ class TabbyService
 
             $hppResponse = Http::baseUrl($this->tabbyBaseUrl)
                 ->withHeaders([
-                    'Authorization' => 'Bearer ' .  $this->tabbyPublicKey,
+                    // ⚠ FIXED: was tabbyPublicKey — the older, working
+                    // checkout() function in this same file uses
+                    // tabbySecretKey consistently for BOTH the checkout
+                    // call and this send_hpp_link call. This mismatch is
+                    // the likely cause of "Failed to send Tabby hosted
+                    // payment page link." — send_hpp_link triggers a
+                    // server-side SMS send, which Tabby may specifically
+                    // require the secret key for, unlike checkout creation.
+                    'Authorization' => 'Bearer ' .  $this->tabbySecretKey,
                     'Content-Type' => 'application/json',
                 ])
                 ->post("checkout/{$responseData['id']}/send_hpp_link", $payload);
