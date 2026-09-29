@@ -370,16 +370,11 @@ class TabbyService
                     'Content-Type' => 'application/json',
                 ])
                 ->post("checkout/{$responseData['id']}/send_hpp_link", $hppPayload);
-            TelegramService::send(
-                "⚠️ Sending Tabby hosted payment page link\n\n"
-                    . "hppResponse: {$hppResponse}\n"
-                    . "reference_id: {$reference_id}\n"
-                    . "checkout_id: {$responseData['id']}"
-            );
             if (!$hppResponse->successful()) {
                 TelegramService::send(
                     "⚠️ Failed to send Tabby hosted payment page link\n\n"
                         . "reference_id: {$reference_id}\n"
+                        . "hppResponse: {$hppResponse}\n"
                         . "checkout_id: {$responseData['id']}\n"
                         . "status: {$hppResponse->status()}\n"
                         . "body: {$hppResponse->body()}"
