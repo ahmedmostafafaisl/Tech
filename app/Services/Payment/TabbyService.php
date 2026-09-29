@@ -389,6 +389,14 @@ class TabbyService
                     'status'       => $hppResponse->status(),
                     'body'         => $hppResponse->body(),
                 ]);
+
+                \App\Services\Telegram\TelegramService::send(
+                    "⚠️ Failed to send Tabby hosted payment page link\n\n"
+                        . "reference_id: {$reference_id}\n"
+                        . "checkout_id: {$responseData['id']}\n"
+                        . "status: {$hppResponse->status()}\n"
+                        . "body: {$hppResponse->body()}"
+                );
                 // Not fatal — the checkout itself succeeded and web_url
                 // below still works as a fallback delivery method.
             }

@@ -2,17 +2,16 @@
 
 namespace App\Services\DY365;
 
-use App\Models\DyEnvironment;
-use App\Services\Payment\ClickPayService;
+use App\Services\TaqnyatSmsService;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use App\Services\Payment\TabbyService;
 use App\Services\Payment\TamaraService;
-use App\Services\TaqnyatSmsService;
+use App\Services\Payment\ClickPayService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\Response;
 
 class DyService
 {
@@ -90,7 +89,7 @@ class DyService
     {
         $this->smsService = $smsService;
 
-        $this->baseUrl = DyEnvironment::getDefaultUrl();
+        $this->baseUrl = \App\Models\DyEnvironment::getDefaultUrl();
 
         $this->tokenUrl = "https://login.microsoftonline.com/015ce0d4-cd51-4914-9ada-bdaff52b5c3d/oauth2/token";
         $this->clientId = config('services.dy365.client_id', '');
