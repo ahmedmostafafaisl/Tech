@@ -4,11 +4,12 @@ namespace App\Services\Payment;
 
 
 use App\Models\Appointment;
-use App\Models\TabbyPayment;
 use App\Models\DyPaymentLink;
+use App\Models\TabbyPayment;
+use App\Services\Telegram\TelegramService;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 
 class TabbyService
@@ -270,13 +271,6 @@ class TabbyService
     {
         $reference_id = $payment['reference_id'];
 
-        // ⚠ This system doesn't currently capture customer email/name/DOB
-        // anywhere on DirectAppointment or DirectAppointmentPayment — there
-        // was never a real $data source for these fields (the previous
-        // code referenced an undefined $data variable, so these fallbacks
-        // were ALWAYS being sent regardless, silently). If real customer
-        // name/email becomes available somewhere, wire it in here instead
-        // of these static placeholders.
         $buyerEmail   = "card.success@tabby.ai";
         $buyerName    = "Naqi";
         $buyerDob     = "1996-08-24";
@@ -367,38 +361,29 @@ class TabbyService
             $payment->payment_id = $responseData['payment']['id'] ?? null;
             $payment->save();
 
+
+            $hppPayload = ['product' => 'installments'];
+
             $hppResponse = Http::baseUrl($this->tabbyBaseUrl)
                 ->withHeaders([
-                    // ⚠ FIXED: was tabbyPublicKey — the older, working
-                    // checkout() function in this same file uses
-                    // tabbySecretKey consistently for BOTH the checkout
-                    // call and this send_hpp_link call. This mismatch is
-                    // the likely cause of "Failed to send Tabby hosted
-                    // payment page link." — send_hpp_link triggers a
-                    // server-side SMS send, which Tabby may specifically
-                    // require the secret key for, unlike checkout creation.
-                    'Authorization' => 'Bearer ' .  $this->tabbySecretKey,
+                    'Authorization' => 'Bearer ' . $this->tabbySecretKey,
                     'Content-Type' => 'application/json',
                 ])
-                ->post("checkout/{$responseData['id']}/send_hpp_link", $payload);
-
+                ->post("checkout/{$responseData['id']}/send_hpp_link", $hppPayload);
+            TelegramService::send(
+                "⚠️ Sending Tabby hosted payment page link\n\n"
+                    . "hppResponse: {$hppResponse->body()}\n"
+                    . "reference_id: {$reference_id}\n"
+                    . "checkout_id: {$responseData['id']}"
+            );
             if (!$hppResponse->successful()) {
-                Log::error('Failed to send Tabby hosted payment page link.', [
-                    'reference_id' => $reference_id,
-                    'checkout_id'  => $responseData['id'],
-                    'status'       => $hppResponse->status(),
-                    'body'         => $hppResponse->body(),
-                ]);
-
-                \App\Services\Telegram\TelegramService::send(
+                TelegramService::send(
                     "⚠️ Failed to send Tabby hosted payment page link\n\n"
                         . "reference_id: {$reference_id}\n"
                         . "checkout_id: {$responseData['id']}\n"
                         . "status: {$hppResponse->status()}\n"
                         . "body: {$hppResponse->body()}"
                 );
-                // Not fatal — the checkout itself succeeded and web_url
-                // below still works as a fallback delivery method.
             }
         }
 
