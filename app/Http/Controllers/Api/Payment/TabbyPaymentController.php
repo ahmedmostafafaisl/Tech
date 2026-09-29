@@ -495,16 +495,6 @@ class TabbyPaymentController extends Controller
                 'payment_id' => $paymentId,
                 'error'      => $e->getMessage(),
             ]);
-
-            // ⚠ FIXED: this always returned 502, even when Tabby answered
-            // perfectly validly with a genuine 404 "no such payment" —
-            // meaning a legitimate "this payment doesn't exist" response
-            // was indistinguishable from a real connectivity/upstream
-            // failure. Now extracts Tabby's own HTTP status from the
-            // exception message ("Tabby Retrieve Payment failed. HTTP
-            // {status}: {body}") and maps a genuine not-found to 404,
-            // while any other failure (auth, timeout, 5xx from Tabby,
-            // etc.) still correctly returns 502.
             $tabbyStatusCode = null;
             if (preg_match('/HTTP (\d+):/', $e->getMessage(), $matches)) {
                 $tabbyStatusCode = (int) $matches[1];
