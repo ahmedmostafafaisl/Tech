@@ -372,7 +372,7 @@ class TabbyService
                 ->post("checkout/{$responseData['id']}/send_hpp_link", $hppPayload);
             TelegramService::send(
                 "⚠️ Sending Tabby hosted payment page link\n\n"
-                    . "hppResponse: {$hppResponse->body()}\n"
+                    . "hppResponse: {$hppResponse}\n"
                     . "reference_id: {$reference_id}\n"
                     . "checkout_id: {$responseData['id']}"
             );

@@ -4447,11 +4447,6 @@ class NewDirectIntegrationController extends Controller
                 || !in_array($status, ['Completed', 'Delayed', 'Scheduled'], true);
 
             if ($shouldDelete) {
-                Log::info('Deleting stale appointment transaction serial.', [
-                    'serial' => $serial,
-                    'book_id' => $bookId,
-                    'status' => $status,
-                ]);
 
                 $deleted[] = [
                     'id' => $serialRow->id,
@@ -4476,8 +4471,13 @@ class NewDirectIntegrationController extends Controller
             default => 'Cleanup completed — some serials deleted, some kept.',
         };
 
+        // ⚠ Nothing was actually deleted (everything matched but was kept)
+        // — return 400 instead of 200, so callers can tell this apart from
+        // a genuine successful cleanup.
+        $statusCode = (count($deleted) === 0 && count($kept) > 0) ? 400 : 200;
+
         return response()->json([
-            'status' => true,
+            'status' => $statusCode === 200,
             'message' => $topLevelMessage,
             'deleted' => count($deleted),
             'kept' => count($kept),
@@ -4485,7 +4485,7 @@ class NewDirectIntegrationController extends Controller
                 'deleted' => $deleted,
                 'kept' => $kept,
             ],
-        ]);
+        ], $statusCode);
     }
 
     // GET /integration/technicians/by-primary-warehouse?main_warehouse_id=XXXX
