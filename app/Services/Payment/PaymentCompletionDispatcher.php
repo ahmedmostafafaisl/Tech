@@ -256,6 +256,13 @@ class PaymentCompletionDispatcher
             'complete_v2_calling' => 'running:' . now()->format('Y-m-d H:i:s'),
         ]);
 
+        $appointment->update([
+            'total_amount_sum'   => (float) ($appointmentData['TotalAmountSum'] ?? 0),
+            'dy_required_amount' => $rawRequiredAmount,
+            'used_balance'       => abs((float) ($appointmentData['used_balance'] ?? 0)),
+            'paid_amount'        => $paidAmountForBody,
+        ]);
+
         $payloadJson = json_encode($body, JSON_UNESCAPED_UNICODE);
         $payloadB64  = base64_encode($payloadJson);
 
@@ -266,11 +273,7 @@ class PaymentCompletionDispatcher
             . escapeshellarg($payloadB64)
             . " >> " . escapeshellarg($bgLogFile) . " 2>&1 &";
 
-        Log::info('Dispatch payments:complete exec', [
-            'appointment_id' => $appointment->id,
-            'cmd'            => $cmd,
-            'bg_log'         => $bgLogFile,
-        ]);
+
 
         exec($cmd);
 

@@ -28,7 +28,11 @@ class DirectAppointment extends Model
         'dy_attachment_status',
         'customer_phone',
         'order_type',
-        'installment_status'
+        'installment_status',
+        'total_amount_sum',
+        'dy_required_amount',
+        'used_balance',
+        'paid_amount',
     ];
     protected $casts = [
         'discount' => 'float',
