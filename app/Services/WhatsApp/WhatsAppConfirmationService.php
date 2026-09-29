@@ -19,6 +19,15 @@ class WhatsAppConfirmationService
 
     public function sendTemplateMessage(string $to, string $templateName, array $bodyParameters = [], array $buttonParameters = [], string $lang = 'ar')
     {
+        if (!\App\Models\Setting::isActive('whatsapp_send_messages_active', true)) {
+            \Illuminate\Support\Facades\Log::info('WhatsApp send skipped — whatsapp_send_messages_active is off.', [
+                'to' => $to,
+                'template' => $templateName,
+            ]);
+
+            return ['status' => 'skipped', 'reason' => 'whatsapp_send_messages_active is off'];
+        }
+
         $components = [];
 
         // body parameters

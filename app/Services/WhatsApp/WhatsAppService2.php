@@ -156,6 +156,15 @@ class WhatsAppService2
         array  $buttonParameters = [],
         string $lang             = 'ar'
     ): mixed {
+        if (!\App\Models\Setting::isActive('whatsapp_send_messages_active', true)) {
+            \Illuminate\Support\Facades\Log::info('WhatsApp send skipped — whatsapp_send_messages_active is off.', [
+                'to' => $to,
+                'template' => $templateName,
+            ]);
+
+            return ['status' => 'skipped', 'reason' => 'whatsapp_send_messages_active is off'];
+        }
+
         $components = [];
 
         // Body component

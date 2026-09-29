@@ -21,6 +21,18 @@ class WhatsAppService
 
     public function sendTemplateMessage(string $to, string $templateName, array $parameters = [], string $lang = 'ar')
     {
+        // ✅ Global kill-switch — default true (send normally). When
+        // explicitly set to false, no WhatsApp message goes out at all,
+        // from anywhere in the app.
+        if (!\App\Models\Setting::isActive('whatsapp_send_messages_active', true)) {
+            \Illuminate\Support\Facades\Log::info('WhatsApp send skipped — whatsapp_send_messages_active is off.', [
+                'to' => $to,
+                'template' => $templateName,
+            ]);
+
+            return ['status' => 'skipped', 'reason' => 'whatsapp_send_messages_active is off'];
+        }
+
         $payload = [
             "messaging_product" => "whatsapp",
             "recipient_type"    => "individual",
@@ -64,6 +76,14 @@ class WhatsAppService
      */
     public function sendTextMessage(string $to, string $text): mixed
     {
+        if (!\App\Models\Setting::isActive('whatsapp_send_messages_active', true)) {
+            \Illuminate\Support\Facades\Log::info('WhatsApp send skipped — whatsapp_send_messages_active is off.', [
+                'to' => $to,
+            ]);
+
+            return ['status' => 'skipped', 'reason' => 'whatsapp_send_messages_active is off'];
+        }
+
         $payload = [
             "messaging_product" => "whatsapp",
             "recipient_type"    => "individual",
