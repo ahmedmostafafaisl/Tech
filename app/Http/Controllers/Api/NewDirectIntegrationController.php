@@ -1737,11 +1737,17 @@ class NewDirectIntegrationController extends Controller
                     fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
                 );
 
-                if ($totalAmountSum < 500) {
-                    $isTechVisitOnly = $salesLinesForCheck->contains(
-                        fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
-                    );
+                // fes-tech-visit's own price (35) never counts toward the
+                // 500 threshold — it's subtracted out before comparing,
+                // so an appointment isn't exempted from the delivery-fee
+                // requirement just because a tech-visit line happened to
+                // push TotalAmountSum over 500 on its own.
+                $isTechVisitOnly = $salesLinesForCheck->contains(
+                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
+                );
+                $adjustedTotalAmountSum = $totalAmountSum - ($isTechVisitOnly ? 35 : 0);
 
+                if ($adjustedTotalAmountSum < 500) {
                     if (! $isTechVisitOnly && ! $hasDeliveryFee && ! $hasNaqiS00004ForDeliveryCheck) {
                         $logService->validationFailed(
                             techId: $tech_id,
@@ -1753,6 +1759,7 @@ class NewDirectIntegrationController extends Controller
                             responsePayload: [
                                 'order_type_id' => $orderTypeId,
                                 'total_amount_sum' => $totalAmountSum,
+                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
                             ],
                             userId: auth()->id(),
                         );
@@ -1774,6 +1781,7 @@ class NewDirectIntegrationController extends Controller
                             responsePayload: [
                                 'order_type_id' => $orderTypeId,
                                 'total_amount_sum' => $totalAmountSum,
+                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
                             ],
                             userId: auth()->id(),
                         );
@@ -2600,11 +2608,17 @@ class NewDirectIntegrationController extends Controller
                     fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
                 );
 
-                if ($totalAmountSum < 500) {
-                    $isTechVisitOnly = $salesLinesForCheck->contains(
-                        fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
-                    );
+                // fes-tech-visit's own price (35) never counts toward the
+                // 500 threshold — it's subtracted out before comparing,
+                // so an appointment isn't exempted from the delivery-fee
+                // requirement just because a tech-visit line happened to
+                // push TotalAmountSum over 500 on its own.
+                $isTechVisitOnly = $salesLinesForCheck->contains(
+                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
+                );
+                $adjustedTotalAmountSum = $totalAmountSum - ($isTechVisitOnly ? 35 : 0);
 
+                if ($adjustedTotalAmountSum < 500) {
                     if (! $isTechVisitOnly && ! $hasDeliveryFee && ! $hasNaqiS00004ForDeliveryCheck) {
                         $logService->validationFailed(
                             techId: $tech_id,
@@ -2616,6 +2630,7 @@ class NewDirectIntegrationController extends Controller
                             responsePayload: [
                                 'order_type_id' => $orderTypeId,
                                 'total_amount_sum' => $totalAmountSum,
+                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
                             ],
                             userId: auth()->id(),
                         );
@@ -2637,6 +2652,7 @@ class NewDirectIntegrationController extends Controller
                             responsePayload: [
                                 'order_type_id' => $orderTypeId,
                                 'total_amount_sum' => $totalAmountSum,
+                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
                             ],
                             userId: auth()->id(),
                         );

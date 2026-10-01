@@ -413,7 +413,12 @@ class PaymentCompletionDispatcher
         $totalAmountSum = (float) ($appointmentData['TotalAmountSum'] ?? 0);
         $logService = app(\App\Services\Logs\TechnicianAppointmentLogService::class);
 
-        if ($totalAmountSum < 500) {
+        // fes-tech-visit's own price (35) never counts toward the 500
+        // threshold — subtracted out before comparing, same as the
+        // controller-side check in sendPaymentLinks()/completeAppointment().
+        $adjustedTotalAmountSum = $totalAmountSum - ($hasFesTechVisit ? 35 : 0);
+
+        if ($adjustedTotalAmountSum < 500) {
             if (!$hasFesTechVisit && !$hasDlvFee1 && !$hasNaqiS00004ForDeliveryCheck) {
                 $logService->validationFailed(
                     techId: $appointment->tech_id,
@@ -424,6 +429,7 @@ class PaymentCompletionDispatcher
                     responsePayload: [
                         'order_type_id'    => $orderType,
                         'total_amount_sum' => $totalAmountSum,
+                        'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
                     ],
                 );
 
@@ -444,6 +450,7 @@ class PaymentCompletionDispatcher
                     responsePayload: [
                         'order_type_id'    => $orderType,
                         'total_amount_sum' => $totalAmountSum,
+                        'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
                     ],
                 );
 
