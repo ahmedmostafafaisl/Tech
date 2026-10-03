@@ -188,10 +188,12 @@ class DyService
         ];
 
         try {
+            [$tokenTimeout, $tokenAttempts] = DyRequestBudget::plan(20, 2);
+
             $response = Http::asForm()
-                ->connectTimeout(5)
-                ->timeout(20)
-                ->retry(2, 500, function ($exception) {
+                ->connectTimeout(min(5, $tokenTimeout))
+                ->timeout($tokenTimeout)
+                ->retry($tokenAttempts, 500, function ($exception) {
                     if ($exception instanceof ConnectionException) return true;
                     if ($exception instanceof RequestException) {
                         $status = $exception->response?->status();
@@ -235,12 +237,14 @@ class DyService
             }
 
             $doRequest = function (string $token) use ($method, $endpoint, $payload) {
+                [$timeoutSec, $attempts] = DyRequestBudget::plan(60, 2);
+
                 return Http::withToken($token)
                     ->acceptJson()
                     ->asJson()
-                    ->connectTimeout(5)
-                    ->timeout(60)
-                    ->retry(2, 1000, function ($exception) {
+                    ->connectTimeout(min(5, $timeoutSec))
+                    ->timeout($timeoutSec)
+                    ->retry($attempts, 1000, function ($exception) {
                         if ($exception instanceof ConnectionException) return true;
                         if ($exception instanceof RequestException) {
                             $status = $exception->response?->status();
@@ -661,6 +665,71 @@ class DyService
         return $this->sendRequest2('post', $this->customerChangeRequest, $payload);
     }
 
+    /**
+     * Same call, but time-boxed and honest about what happened — see
+     * DyTransportOutcome. sendRequest2 waits up to 500s, retries 3 times and
+     * returns null for every failure, which the caller then treated as success.
+     * This makes ONE attempt (a change request is not idempotent: retrying after
+     * a timeout could create it twice in DY) and reports whether DY answered,
+     * may have received it, or definitely did not.
+     *
+     * @return array{outcome:string,status:?int,body:?array,error:?string}
+     */
+    public function submitCustomerChangeRequestWithin(array $payload, int $seconds): array
+    {
+        $startedAt = microtime(true);
+        $seconds   = max(3, $seconds);
+        $timeLeft  = fn(): int => (int) floor($seconds - (microtime(true) - $startedAt));
+
+        $send = function (string $token, int $timeout) use ($payload) {
+            return Http::withToken($token)
+                ->acceptJson()
+                ->asJson()
+                ->connectTimeout(min(5, $timeout))
+                ->timeout($timeout)
+                ->post($this->baseUrl . $this->customerChangeRequest, $payload);
+        };
+
+        try {
+            $token = $this->getToken();
+
+            if (! $token) {
+                return DyTransportOutcome::notSent('Missing access token');
+            }
+
+            $left = $timeLeft();
+            if ($left < 3) {
+                return DyTransportOutcome::notSent('No time left to call Dynamics');
+            }
+
+            $response = $send($token, $left);
+
+            // A 401 is refused before DY processes anything, so refreshing the
+            // token and sending once more cannot create a duplicate.
+            if ($response->status() === 401) {
+                Cache::forget('dy:oauth:access_token');
+                $token = $this->getToken();
+                $left  = $timeLeft();
+
+                if (! $token || $left < 3) {
+                    return DyTransportOutcome::notSent('Token rejected and could not be refreshed in time');
+                }
+
+                $response = $send($token, $left);
+            }
+
+            return DyTransportOutcome::fromResponse($response->status(), $response->json());
+        } catch (ConnectionException $e) {
+            $this->logError(__FUNCTION__, $e->getMessage());
+
+            return DyTransportOutcome::fromTransportError($e->getMessage());
+        } catch (\Throwable $e) {
+            $this->logError(__FUNCTION__, $e->getMessage());
+
+            return DyTransportOutcome::notSent($e->getMessage());
+        }
+    }
+
     // get customer change requests
     public function getCustomerChangeRequests(array $payload = [])
     {
@@ -769,12 +838,14 @@ class DyService
             }
 
             $send = function (string $token) use ($method, $endpoint, $payload) {
+                [$timeoutSec, $attempts] = DyRequestBudget::plan(60, 2);
+
                 return Http::withToken($token)
                     ->acceptJson()
                     ->asJson()
-                    ->connectTimeout(5)
-                    ->timeout(60)
-                    ->retry(2, 1000, function ($exception) {
+                    ->connectTimeout(min(5, $timeoutSec))
+                    ->timeout($timeoutSec)
+                    ->retry($attempts, 1000, function ($exception) {
                         if ($exception instanceof ConnectionException) return true;
 
                         if ($exception instanceof RequestException) {
@@ -822,13 +893,15 @@ class DyService
             }
 
             $send = function (string $token) use ($method, $endpoint, $payload): Response {
+                [$timeoutSec, $attempts] = DyRequestBudget::plan(60, 2);
+
                 return Http::withToken($token)
                     ->acceptJson()
                     ->asJson()
-                    ->connectTimeout(5)
-                    ->timeout(60)
+                    ->connectTimeout(min(5, $timeoutSec))
+                    ->timeout($timeoutSec)
                     ->retry(
-                        2,
+                        $attempts,
                         1000,
                         function ($exception) {
                             if ($exception instanceof ConnectionException) {

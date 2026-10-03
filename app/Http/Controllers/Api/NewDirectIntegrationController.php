@@ -3159,6 +3159,11 @@ class NewDirectIntegrationController extends Controller
     // tech appointment change request
     public function submitChangeRequest(Request $request)
     {
+        // Time box: answer within ~60s no matter how slow DY is (Cloudflare gives up
+        // at ~100s). The DY call below gets whatever is left of this window.
+        $requestDeadline = microtime(true) + 55;
+        \App\Services\DY365\DyRequestBudget::begin(55);
+
         $logService = app(TechnicianAppointmentLogService::class);
 
         $requestPayloadForLog = $request->except([
@@ -3311,7 +3316,84 @@ class NewDirectIntegrationController extends Controller
                 ],
             ];
 
-            $response = $this->dyService->submitCustomerChangeRequest($payload);
+            // One attempt, limited to what is left of the 60s window. (Previously this
+            // waited up to 500s x 3 retries inside this open transaction, and any
+            // failure came back as null — which the check below treated as success.)
+            $outcome = $this->dyService->submitCustomerChangeRequestWithin(
+                $payload,
+                (int) max(5, floor($requestDeadline - microtime(true)))
+            );
+
+            // DY definitely never received it → nothing to keep.
+            if ($outcome['outcome'] === \App\Services\DY365\DyTransportOutcome::NOT_SENT) {
+                DB::rollBack();
+
+                $logService->failed(
+                    techId: $techId,
+                    action: 'submit_change_request',
+                    bookId: $bookId,
+                    salesOrderId: $data['sales_order_id'],
+                    message: 'Change request not sent — could not reach Dynamics',
+                    requestPayload: $requestPayloadForLog,
+                    error: $outcome['error'],
+                    userId: auth()->id(),
+                    meta: ['attachments_count' => count($attachmentUrls)],
+                );
+
+                return response()->json([
+                    'status'     => false,
+                    'sent_to_dy' => false,
+                    'message'    => 'Could not reach Dynamics. The request was not sent — please try again.',
+                ], 502);
+            }
+
+            // DY may have received it but did not answer in time → keep it and say so
+            // honestly. Rolling back could lose a request DY did process.
+            if ($outcome['outcome'] === \App\Services\DY365\DyTransportOutcome::UNCONFIRMED) {
+                DB::commit();
+
+                Cache::forget("change_requests:{$data['bookId']}:{$data['sales_order_id']}");
+
+                $logService->log(
+                    techId: $techId,
+                    action: 'submit_change_request',
+                    status: 'pending',
+                    bookId: $bookId,
+                    salesOrderId: $data['sales_order_id'],
+                    message: 'Change request sent to Dynamics — no confirmation within the time limit',
+                    requestPayload: $requestPayloadForLog,
+                    responsePayload: $outcome,
+                    userId: auth()->id(),
+                    meta: [
+                        'change_request_id' => $changeRequest->id,
+                        'attachments_count' => count($attachmentUrls),
+                    ],
+                );
+
+                \App\Services\Telegram\TelegramService::send(
+                    "⏱ Change request sent to Dynamics, no confirmation\n\n"
+                        . "book_id: {$data['bookId']}\n"
+                        . "sales_order_id: {$data['sales_order_id']}\n"
+                        . "change_request_id: {$changeRequest->id}\n"
+                        . "detail: {$outcome['error']}"
+                );
+
+                return response()->json([
+                    'status'            => true,
+                    'sent_to_dy'        => true,
+                    'dy_confirmed'      => false,
+                    'change_request_id' => $changeRequest->id,
+                    'message'           => 'The request was sent to Dynamics, but no confirmation arrived within the time limit.',
+                ], 202);
+            }
+
+            // DY answered. A 4xx with no JSON body is still a refusal.
+            $response   = $outcome['body'];
+            $httpStatus = (int) $outcome['status'];
+
+            if ($response === null && $httpStatus >= 400) {
+                $response = ['Status' => false, 'Code' => $httpStatus, 'Error' => "Dynamics replied with HTTP {$httpStatus}"];
+            }
 
             // Matches your success payload shape:
             // {"$id":"1","Status":true,"Data":"Appointment is updated successfully.","Error":null,"Code":200}
@@ -3398,6 +3480,8 @@ class NewDirectIntegrationController extends Controller
                 'status' => false,
                 'message' => $e->getMessage(),
             ], 500);
+        } finally {
+            \App\Services\DY365\DyRequestBudget::clear();
         }
     }
 

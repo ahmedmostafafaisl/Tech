@@ -27,44 +27,81 @@ class AppointmentFormSubmissionController extends Controller
         $salesOrderId = $validated['sales_order_id'];
         $bookId       = $validated['book_id'];
 
-        $controller = app(\App\Http\Controllers\Api\NewDirectIntegrationController::class);
-        // 0) check stock for all items before proceeding
-        $stockCheck = $controller->salesLinesSummaryByBookId($bookId);
-        if ($stockCheck !== null) {
-            return $stockCheck; // returns the 400 error response
-        }
+        // Time box. The Dynamics send itself is already a background command
+        // (DB::afterCommit in the service), so what made this endpoint time out was
+        // everything BEFORE it: the stock check and preCheck make several DY calls
+        // with 60s timeouts and retries. They may now use at most 40s of the ~60s
+        // this request is allowed; the rest is left for saving + uploads.
+        \App\Services\DY365\DyRequestBudget::begin(40);
+        $prechecksSkipped = false;
 
-        // ── Pre-check: verify appointment is eligible before doing anything ──
-        $appointment = DirectAppointment::where('sales_order_id', $salesOrderId)
-            ->where('book_id', $bookId)
-            ->orderByDesc('id')
-            ->first();
+        try {
+            $controller = app(\App\Http\Controllers\Api\NewDirectIntegrationController::class);
+            // 0) check stock for all items before proceeding
+            $stockCheck = $controller->salesLinesSummaryByBookId($bookId);
+            if ($stockCheck !== null) {
+                if (\App\Services\DY365\DyRequestBudget::exhausted()) {
+                    // The result was computed after DY ran out of time (missing stock
+                    // lookups look like "no stock"), so it can't be trusted. The
+                    // background send re-validates stock before anything reaches DY.
+                    $prechecksSkipped = true;
+                    Log::warning('Form submission: stock check skipped — Dynamics too slow', ['book_id' => $bookId]);
+                } else {
+                    return $stockCheck; // returns the 400/503 error response
+                }
+            }
 
-        if (!$appointment) {
-            return response()->json([
-                'message' => 'No appointment found for this sales order and book.',
-                'errors'  => [
-                    'sales_order_id' => ['No appointment found for this sales order and book.'],
-                    'book_id'        => ['No appointment found for this sales order and book.'],
-                ],
-            ], 422);
-        }
+            // ── Pre-check: verify appointment is eligible before doing anything ──
+            $appointment = DirectAppointment::where('sales_order_id', $salesOrderId)
+                ->where('book_id', $bookId)
+                ->orderByDesc('id')
+                ->first();
 
-        $check = $this->dispatcher->preCheck($appointment);
+            if (!$appointment) {
+                return response()->json([
+                    'message' => 'No appointment found for this sales order and book.',
+                    'errors'  => [
+                        'sales_order_id' => ['No appointment found for this sales order and book.'],
+                        'book_id'        => ['No appointment found for this sales order and book.'],
+                    ],
+                ], 422);
+            }
 
-        if (!($check['ok'] ?? false)) {
-            Log::warning('Form submission blocked by pre-check', [
-                'appointment_id' => $appointment->id,
-                'sales_order_id' => $salesOrderId,
-                'book_id'        => $bookId,
-                'reason'         => $check['reason'] ?? 'unknown',
-                'check'          => $check,
-            ]);
+            $check = $this->dispatcher->preCheck($appointment);
 
-            return response()->json([
-                'message' => 'Appointment is not eligible for submission.',
-                'reason'  => $check['reason'] ?? 'unknown',
-            ], 422);
+            if (!($check['ok'] ?? false)) {
+                if (\App\Services\DY365\DyRequestBudget::exhausted()) {
+                    // Same reasoning: a failure that happened because DY timed out is
+                    // not a verdict on the appointment. dispatch() runs the same checks.
+                    $prechecksSkipped = true;
+                    Log::warning('Form submission: pre-check skipped — Dynamics too slow', [
+                        'appointment_id' => $appointment->id,
+                        'book_id'        => $bookId,
+                        'reason'         => $check['reason'] ?? 'unknown',
+                    ]);
+                } else {
+                    Log::warning('Form submission blocked by pre-check', [
+                        'appointment_id' => $appointment->id,
+                        'sales_order_id' => $salesOrderId,
+                        'book_id'        => $bookId,
+                        'reason'         => $check['reason'] ?? 'unknown',
+                        'check'          => $check,
+                    ]);
+
+                    return response()->json([
+                        'message' => 'Appointment is not eligible for submission.',
+                        'reason'  => $check['reason'] ?? 'unknown',
+                    ], 422);
+                }
+            }
+
+            // preCheck can also fail OPEN when DY times out (it falls back to local
+            // data and passes), so record a spent budget even if nothing was rejected.
+            if (\App\Services\DY365\DyRequestBudget::exhausted()) {
+                $prechecksSkipped = true;
+            }
+        } finally {
+            \App\Services\DY365\DyRequestBudget::clear();
         }
 
         // ── Proceed with submission ───────────────────────────────────────────
@@ -75,12 +112,17 @@ class AppointmentFormSubmissionController extends Controller
         );
 
         // Background Dynamics dispatch + payment completion are handled
-        // inside the service via DB::afterCommit → artisan command.
-
+        // inside the service via DB::afterCommit → artisan command, so the
+        // request ends here instead of waiting on Dynamics.
         $submission = $this->repo->loadForResponse($submissionId);
 
         return (new AppointmentFormSubmissionResource($submission))
-            ->additional(['message' => 'Form submitted successfully.'])
+            ->additional([
+                'message'           => 'Form submitted successfully.',
+                'sent_to_dy'        => true,   // the background send has been launched
+                'dy_confirmed'      => false,  // Dynamics' answer arrives later, in the background
+                'prechecks_skipped' => $prechecksSkipped,
+            ])
             ->response()
             ->setStatusCode(201);
     }
