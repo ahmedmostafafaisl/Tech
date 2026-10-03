@@ -492,9 +492,9 @@ Route::post('/services/{id}', [ServiceController::class, 'update'])->name('servi
 Route::post('/services/{id}/delete', [ServiceController::class, 'delete'])->name('services.delete');
 
 //  fix appointments data
-Route::post('/fix-appointments-data', [NewDirectIntegrationController::class, 'fixAppointments']);
+Route::middleware('auth:sanctum')->post('/fix-appointments-data', [NewDirectIntegrationController::class, 'fixAppointments']);
 // test complete v2
-Route::post('/test-complete-v2', [NewDirectIntegrationController::class, 'testCompleteV2'])->name('test.complete.v2');
+Route::middleware('auth:sanctum')->post('/test-complete-v2', [NewDirectIntegrationController::class, 'testCompleteV2'])->name('test.complete.v2');
 
 Route::post('/run-appointments-reminder', [NewDirectIntegrationController::class, 'run_reminder']);
 
