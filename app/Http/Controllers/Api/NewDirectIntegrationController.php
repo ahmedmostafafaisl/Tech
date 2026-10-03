@@ -2307,41 +2307,17 @@ class NewDirectIntegrationController extends Controller
         return response()->json(['status' => 'not_found', 'timer' => $remaining]);
     }
 
+    /**
+     * Seconds (despite the name) left before this technician may send
+     * another appointment to DY, or null when free. All the logic lives in
+     * TechnicianSendCooldown so the gates and the actual sender share it.
+     */
     public function getRemainingCooldownMinutes(?int $techId = null, ?string $excludeBookId = null): ?int
     {
         $techId = $techId ?? auth()->user()?->tech_id;
 
-        if (!$techId) {
-            return null;
-        }
-
-        $query = DirectAppointment::where('tech_id', $techId)
-            ->where('complete_v2_calling', 'like', 'done:%');
-
-        // "or until the number registered in the database is used" — if
-        // the technician's most recent completed appointment IS the
-        // current one being processed, don't let it count against
-        // itself; look for the next most recent genuinely different one.
-        if ($excludeBookId) {
-            $query->where('book_id', '!=', $excludeBookId);
-        }
-
-        $lastAppointment = $query->latest('updated_at')->first();
-
-        if (! $lastAppointment) {
-            return null;
-        }
-
-        $doneAt = Carbon::parse(
-            str_replace('done:', '', $lastAppointment->complete_v2_calling)
-        );
-
-        $cooldownMinutes = (int) Setting::get('appointment_cooldown_minutes', 15);
-
-        $secondsSinceDone = $doneAt->diffInSeconds(now());
-        $totalSeconds = ($cooldownMinutes * 60) - $secondsSinceDone;
-
-        return $totalSeconds > 0 ? $totalSeconds : null;
+        return app(\App\Services\Payment\TechnicianSendCooldown::class)
+            ->remainingSeconds($techId, $excludeBookId);
     }
 
     private function resolveSalesLineTimer(?string $bookId): ?int

@@ -6,7 +6,9 @@ use App\Models\CompleteIssue;
 use Illuminate\Console\Command;
 use App\Models\DirectAppointment;
 use App\Services\DY365\DyService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Services\Payment\TechnicianSendCooldown;
 use App\Services\Payment\PaymentCompletionValidator;
 use App\Http\Controllers\Api\NewDirectIntegrationController;
 
@@ -215,11 +217,25 @@ class CompleteSuccessPaymentsCommand extends Command
             }
 
             /**
+             * ✅ Step 3.5: per-technician cooldown — hard guard.
+             *
+             * This command is the ONLY thing that really talks to DY, and it is
+             * launched from several places (dispatcher, Tabby/Tamara/ClickPay
+             * return+webhook handlers, AppointmentRepository). Only the
+             * dispatcher used to check the cooldown, so every other path could
+             * send two appointments for the same technician minutes apart.
+             * Checking here covers all of them. Waiting (instead of failing) is
+             * deliberate: for an online payment the customer has already paid,
+             * so the appointment must still be sent — just not too soon.
+             */
+            $exitCode = $this->waitForTechnicianSlot($appointment);
+            if ($exitCode !== null) {
+                return $exitCode;
+            }
+
+            /**
              * ✅ Step 4: Complete payment
              */
-            Log::info("📤 Sending completeSuccessPaymentsV2", [
-                'appointment_id' => $appointmentId,
-            ]);
 
             $appointment->update([
                 'dy_body' => json_encode($body, JSON_UNESCAPED_UNICODE),
@@ -269,6 +285,120 @@ class CompleteSuccessPaymentsCommand extends Command
 
             $this->error("❌ {$e->getMessage()}");
             return Command::FAILURE;
+        }
+    }
+
+    /**
+     * Blocks (inside this background process only) until the technician's
+     * cooldown has passed, then claims the slot by stamping a fresh running:
+     * marker while holding a MySQL named lock — so two senders for the same
+     * technician can never both pass the check at the same instant, and the
+     * claim is visible to the next sender's cooldown check immediately.
+     *
+     * Returns null when the caller may go ahead and call DY, or an exit code
+     * when this command should stop (completed meanwhile, or gave up).
+     */
+    protected function waitForTechnicianSlot(DirectAppointment $appointment): ?int
+    {
+        $gate      = app(TechnicianSendCooldown::class);
+        $techId    = (string) $appointment->tech_id;
+        $lockName  = 'dy-complete-tech-' . $techId;
+        $maxWait   = 2 * 60 * 60; // never wait more than 2h
+        $startedAt = time();
+        $announced = false;
+
+        // One sender per appointment. Webhooks are retried and users retry, so
+        // the same appointment can be launched twice; now that a sender may wait
+        // for minutes, two of them would both send it once the slot frees up.
+        // This session-scoped lock is held until the process exits (never
+        // released explicitly), so a duplicate launch just steps aside.
+        if ($this->acquireTechnicianLock('dy-complete-appt-' . $appointment->id, 0) === 0) {
+
+            $this->info("ℹ️ Appointment {$appointment->id} is already being handled by another process.");
+
+            return Command::SUCCESS;
+        }
+
+        while (true) {
+            $lock = $this->acquireTechnicianLock($lockName);
+
+            if ($lock !== 0) { // 1 = locked, -1 = locking unavailable (proceed unlocked)
+                try {
+                    $fresh = DirectAppointment::find($appointment->id);
+
+                    if ($fresh && (int) $fresh->complete_flag === 1) {
+                        $this->info("✅ Appointment {$appointment->id} completed while waiting. Skipping.");
+                        return Command::SUCCESS;
+                    }
+
+                    $remaining = $gate->remainingSeconds($techId, $appointment->book_id);
+
+                    if ($remaining === null) {
+                        $appointment->update([
+                            'complete_v2_calling' => 'running:' . now()->format('Y-m-d H:i:s'),
+                        ]);
+
+                        return null;
+                    }
+                } finally {
+                    if ($lock === 1) {
+                        $this->releaseTechnicianLock($lockName);
+                    }
+                }
+            } else {
+                $remaining = 5; // another sender is mid-check; try again shortly
+            }
+
+            if ((time() - $startedAt) + $remaining > $maxWait) {
+                Log::warning('Cooldown wait exceeded the limit — giving up', [
+                    'appointment_id' => $appointment->id,
+                    'tech_id'        => $techId,
+                    'waited_seconds' => time() - $startedAt,
+                ]);
+
+                $appointment->update([
+                    'dy_response' => json_encode([
+                        'error'  => 'Technician cooldown did not clear in time',
+                        'reason' => 'cooldown_wait_exceeded',
+                    ], JSON_UNESCAPED_UNICODE),
+                    'complete_v2_calling' => 'blocked:' . now()->format('Y-m-d H:i:s'),
+                ]);
+
+                return Command::FAILURE;
+            }
+
+            if (! $announced) {
+                $announced = true;
+                Log::info('Technician cooldown active — holding this send', [
+                    'appointment_id'    => $appointment->id,
+                    'tech_id'           => $techId,
+                    'remaining_seconds' => $remaining,
+                ]);
+            }
+
+            // Re-check at least every 30s: it also keeps the DB connection alive
+            // and notices another sender finishing or this appointment completing.
+            sleep((int) max(1, min($remaining, 30)));
+        }
+    }
+
+    protected function acquireTechnicianLock(string $name, int $timeout = 20): int
+    {
+        try {
+            return (int) (DB::selectOne('SELECT GET_LOCK(?, ?) AS l', [$name, $timeout])->l ?? 0);
+        } catch (\Throwable $e) {
+            // Not MySQL / locking unavailable: still enforce the cooldown, just
+            // without mutual exclusion, rather than breaking every completion.
+            return -1;
+        }
+    }
+
+    protected function releaseTechnicianLock(string $name): void
+    {
+        try {
+            DB::select('SELECT RELEASE_LOCK(?)', [$name]);
+        } catch (\Throwable $e) {
+            // lock is released when the connection closes anyway
         }
     }
 
