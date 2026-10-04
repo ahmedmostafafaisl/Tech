@@ -369,11 +369,6 @@ class PaymentCompletionDispatcher
         $hasDlvFee1 = collect($salesLines)->contains(
             fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
         );
-        // naqi-s00004 also satisfies the TotalAmountSum < 500 delivery-fee
-        // requirement below — error only fires when NEITHER item is present.
-        $hasNaqiS00004ForDeliveryCheck = collect($salesLines)->contains(
-            fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
-        );
 
         if ($installmentStatus === 'Need_installation') {
             $isValidSingleVisitLine =
@@ -407,59 +402,58 @@ class PaymentCompletionDispatcher
 
         // Same TotalAmountSum/fes-transportation rule as SendPaymentLinksRequest /
         // NewCompleteAppointmentRequest's controller-level check:
-        //   - TotalAmountSum < 500 (and not tech-visit-only) → sales_lines
-        //     MUST include fes-transportation.
-        //   - TotalAmountSum >= 500 → sales_lines must NOT include fes-transportation.
+        //   - goods subtotal < 500 (and not tech-visit-only) → sales_lines
+        //     MUST include fes-transportation (or naqi-s00004).
+        //   - goods subtotal >= 500 → sales_lines must NOT include fes-transportation.
+        // "Goods subtotal" = TotalAmountSum without the delivery-fee line itself.
         $totalAmountSum = (float) ($appointmentData['TotalAmountSum'] ?? 0);
         $logService = app(\App\Services\Logs\TechnicianAppointmentLogService::class);
 
-        // fes-tech-visit's own price (35) never counts toward the 500
-        // threshold — subtracted out before comparing, same as the
-        // controller-side check in sendPaymentLinks()/completeAppointment().
-        $adjustedTotalAmountSum = $totalAmountSum - ($hasFesTechVisit ? 35 : 0);
+        // ✅ Delivery-fee rule — see DeliveryFeeThreshold: the goods subtotal EXCLUDES the
+        // delivery-fee line itself (and the tech-visit price), same as the controller-side
+        // check in sendPaymentLinks()/completeAppointment(). Comparing the raw
+        // TotalAmountSum made goods of 465–499 impossible to satisfy.
+        $adjustedTotalAmountSum = \App\Services\Payment\DeliveryFeeThreshold::subtotal($totalAmountSum, $salesLines);
+        $deliveryFeeViolation   = \App\Services\Payment\DeliveryFeeThreshold::violation($totalAmountSum, $salesLines);
 
-        if ($adjustedTotalAmountSum < 500) {
-            if (!$hasFesTechVisit && !$hasDlvFee1 && !$hasNaqiS00004ForDeliveryCheck) {
-                $logService->validationFailed(
-                    techId: $appointment->tech_id,
-                    action: 'payment_completion_dispatch',
-                    bookId: $appointment->book_id,
-                    salesOrderId: $appointment->sales_order_id,
-                    message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
-                    responsePayload: [
-                        'order_type_id'    => $orderType,
-                        'total_amount_sum' => $totalAmountSum,
-                        'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
-                    ],
-                );
+        if ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::MISSING) {
+            $logService->validationFailed(
+                techId: $appointment->tech_id,
+                action: 'payment_completion_dispatch',
+                bookId: $appointment->book_id,
+                salesOrderId: $appointment->sales_order_id,
+                message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
+                responsePayload: [
+                    'order_type_id'    => $orderType,
+                    'total_amount_sum' => $totalAmountSum,
+                    'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
+                ],
+            );
 
-                return [
-                    'ok'     => false,
-                    'reason' => 'total_sum_validation_lower_than_500_missing_delivery_fee',
-                    'detail' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
-                ];
-            }
-        } else {
-            if ($hasDlvFee1) {
-                $logService->validationFailed(
-                    techId: $appointment->tech_id,
-                    action: 'payment_completion_dispatch',
-                    bookId: $appointment->book_id,
-                    salesOrderId: $appointment->sales_order_id,
-                    message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
-                    responsePayload: [
-                        'order_type_id'    => $orderType,
-                        'total_amount_sum' => $totalAmountSum,
-                        'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
-                    ],
-                );
+            return [
+                'ok'     => false,
+                'reason' => 'total_sum_validation_lower_than_500_missing_delivery_fee',
+                'detail' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
+            ];
+        } elseif ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::UNEXPECTED) {
+            $logService->validationFailed(
+                techId: $appointment->tech_id,
+                action: 'payment_completion_dispatch',
+                bookId: $appointment->book_id,
+                salesOrderId: $appointment->sales_order_id,
+                message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
+                responsePayload: [
+                    'order_type_id'    => $orderType,
+                    'total_amount_sum' => $totalAmountSum,
+                    'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
+                ],
+            );
 
-                return [
-                    'ok'     => false,
-                    'reason' => 'total_sum_validation_500_or_more_unexpected_delivery_fee',
-                    'detail' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
-                ];
-            }
+            return [
+                'ok'     => false,
+                'reason' => 'total_sum_validation_500_or_more_unexpected_delivery_fee',
+                'detail' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
+            ];
         }
 
         return null;

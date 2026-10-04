@@ -1717,8 +1717,10 @@ class NewDirectIntegrationController extends Controller
                     ->calculate($required_amount, $paidAmount, $usedBalance);
             }
 
-            // ✅ order_type تركيب/منتجات — TotalAmountSum < 500 vs >= 500
-            // (real DY365 data, not the client-submitted items):
+            // ✅ order_type تركيب/منتجات — goods subtotal < 500 vs >= 500
+            // (real DY365 data, not the client-submitted items). The subtotal is
+            // TotalAmountSum WITHOUT the delivery-fee line itself — see
+            // DeliveryFeeThreshold:
             //   - < 500 (and not tech-visit-only): sales_lines MUST
             //     include a delivery fee line (fes-transportation).
             //   - >= 500: sales_lines must NOT include fes-transportation.
@@ -1727,70 +1729,53 @@ class NewDirectIntegrationController extends Controller
             $salesLinesForCheck = collect($lines);
 
             if (in_array($orderTypeId, ['تركيب', 'منتجات'], true)) {
-                $hasDeliveryFee = $salesLinesForCheck->contains(
-                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
-                );
+                // ✅ Delivery-fee rule — see DeliveryFeeThreshold. The goods subtotal EXCLUDES
+                // the delivery-fee line itself (and the tech-visit price). Comparing the raw
+                // TotalAmountSum made goods of 465–499 impossible to satisfy: without the fee
+                // it was "missing", with the fee (total ≥ 500) it was "unexpected".
+                $adjustedTotalAmountSum = \App\Services\Payment\DeliveryFeeThreshold::subtotal($totalAmountSum, $salesLinesForCheck);
+                $deliveryFeeViolation   = \App\Services\Payment\DeliveryFeeThreshold::violation($totalAmountSum, $salesLinesForCheck);
 
-                // naqi-s00004 also satisfies this requirement — error
-                // only fires when NEITHER item is present.
-                $hasNaqiS00004ForDeliveryCheck = $salesLinesForCheck->contains(
-                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
-                );
+                if ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::MISSING) {
+                    $logService->validationFailed(
+                        techId: $tech_id,
+                        action: 'send_payment_links',
+                        bookId: $book_id,
+                        salesOrderId: $sales_order_id,
+                        message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
+                        requestPayload: $request->all(),
+                        responsePayload: [
+                            'order_type_id' => $orderTypeId,
+                            'total_amount_sum' => $totalAmountSum,
+                            'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
+                        ],
+                        userId: auth()->id(),
+                    );
 
-                // fes-tech-visit's own price (35) never counts toward the
-                // 500 threshold — it's subtracted out before comparing,
-                // so an appointment isn't exempted from the delivery-fee
-                // requirement just because a tech-visit line happened to
-                // push TotalAmountSum over 500 on its own.
-                $isTechVisitOnly = $salesLinesForCheck->contains(
-                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
-                );
-                $adjustedTotalAmountSum = $totalAmountSum - ($isTechVisitOnly ? 35 : 0);
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
+                    ], 400);
+                } elseif ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::UNEXPECTED) {
+                    $logService->validationFailed(
+                        techId: $tech_id,
+                        action: 'send_payment_links',
+                        bookId: $book_id,
+                        salesOrderId: $sales_order_id,
+                        message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
+                        requestPayload: $request->all(),
+                        responsePayload: [
+                            'order_type_id' => $orderTypeId,
+                            'total_amount_sum' => $totalAmountSum,
+                            'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
+                        ],
+                        userId: auth()->id(),
+                    );
 
-                if ($adjustedTotalAmountSum < 500) {
-                    if (! $isTechVisitOnly && ! $hasDeliveryFee && ! $hasNaqiS00004ForDeliveryCheck) {
-                        $logService->validationFailed(
-                            techId: $tech_id,
-                            action: 'send_payment_links',
-                            bookId: $book_id,
-                            salesOrderId: $sales_order_id,
-                            message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
-                            requestPayload: $request->all(),
-                            responsePayload: [
-                                'order_type_id' => $orderTypeId,
-                                'total_amount_sum' => $totalAmountSum,
-                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
-                            ],
-                            userId: auth()->id(),
-                        );
-
-                        return response()->json([
-                            'status' => false,
-                            'message' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
-                        ], 400);
-                    }
-                } else {
-                    if ($hasDeliveryFee) {
-                        $logService->validationFailed(
-                            techId: $tech_id,
-                            action: 'send_payment_links',
-                            bookId: $book_id,
-                            salesOrderId: $sales_order_id,
-                            message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
-                            requestPayload: $request->all(),
-                            responsePayload: [
-                                'order_type_id' => $orderTypeId,
-                                'total_amount_sum' => $totalAmountSum,
-                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
-                            ],
-                            userId: auth()->id(),
-                        );
-
-                        return response()->json([
-                            'status' => false,
-                            'message' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
-                        ], 400);
-                    }
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
+                    ], 400);
                 }
             }
 
@@ -2563,7 +2548,8 @@ class NewDirectIntegrationController extends Controller
                     ->calculate($required_amount, $paidAmount, $usedBalance);
             }
 
-            // ✅ order_type تركيب/منتجات + TotalAmountSum < 500 →
+            // ✅ order_type تركيب/منتجات + goods subtotal (TotalAmountSum without
+            // the delivery-fee line — see DeliveryFeeThreshold) < 500 →
             // sales_lines (real DY365 data, not the client-submitted
             // items) must include a delivery fee line (fes-transportation) —
             // UNLESS this is a tech-visit-only appointment (fes-tech-visit
@@ -2574,70 +2560,53 @@ class NewDirectIntegrationController extends Controller
             $salesLinesForCheck = collect($singleAppointment['sales_lines'] ?? []);
 
             if (in_array($orderTypeId, ['تركيب', 'منتجات'], true)) {
-                $hasDeliveryFee = $salesLinesForCheck->contains(
-                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-transportation'
-                );
+                // ✅ Delivery-fee rule — see DeliveryFeeThreshold. The goods subtotal EXCLUDES
+                // the delivery-fee line itself (and the tech-visit price). Comparing the raw
+                // TotalAmountSum made goods of 465–499 impossible to satisfy: without the fee
+                // it was "missing", with the fee (total ≥ 500) it was "unexpected".
+                $adjustedTotalAmountSum = \App\Services\Payment\DeliveryFeeThreshold::subtotal($totalAmountSum, $salesLinesForCheck);
+                $deliveryFeeViolation   = \App\Services\Payment\DeliveryFeeThreshold::violation($totalAmountSum, $salesLinesForCheck);
 
-                // naqi-s00004 also satisfies this requirement — error
-                // only fires when NEITHER item is present.
-                $hasNaqiS00004ForDeliveryCheck = $salesLinesForCheck->contains(
-                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'naqi-s00004'
-                );
+                if ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::MISSING) {
+                    $logService->validationFailed(
+                        techId: $tech_id,
+                        action: 'send_payment_links',
+                        bookId: $book_id,
+                        salesOrderId: $sales_order_id,
+                        message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
+                        requestPayload: $request->all(),
+                        responsePayload: [
+                            'order_type_id' => $orderTypeId,
+                            'total_amount_sum' => $totalAmountSum,
+                            'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
+                        ],
+                        userId: auth()->id(),
+                    );
 
-                // fes-tech-visit's own price (35) never counts toward the
-                // 500 threshold — it's subtracted out before comparing,
-                // so an appointment isn't exempted from the delivery-fee
-                // requirement just because a tech-visit line happened to
-                // push TotalAmountSum over 500 on its own.
-                $isTechVisitOnly = $salesLinesForCheck->contains(
-                    fn($line) => strtolower(trim($line['ItemNumber'] ?? '')) === 'fes-tech-visit'
-                );
-                $adjustedTotalAmountSum = $totalAmountSum - ($isTechVisitOnly ? 35 : 0);
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
+                    ], 400);
+                } elseif ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::UNEXPECTED) {
+                    $logService->validationFailed(
+                        techId: $tech_id,
+                        action: 'send_payment_links',
+                        bookId: $book_id,
+                        salesOrderId: $sales_order_id,
+                        message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
+                        requestPayload: $request->all(),
+                        responsePayload: [
+                            'order_type_id' => $orderTypeId,
+                            'total_amount_sum' => $totalAmountSum,
+                            'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
+                        ],
+                        userId: auth()->id(),
+                    );
 
-                if ($adjustedTotalAmountSum < 500) {
-                    if (! $isTechVisitOnly && ! $hasDeliveryFee && ! $hasNaqiS00004ForDeliveryCheck) {
-                        $logService->validationFailed(
-                            techId: $tech_id,
-                            action: 'send_payment_links',
-                            bookId: $book_id,
-                            salesOrderId: $sales_order_id,
-                            message: 'Missing required delivery fee line for low-value تركيب/منتجات appointment',
-                            requestPayload: $request->all(),
-                            responsePayload: [
-                                'order_type_id' => $orderTypeId,
-                                'total_amount_sum' => $totalAmountSum,
-                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
-                            ],
-                            userId: auth()->id(),
-                        );
-
-                        return response()->json([
-                            'status' => false,
-                            'message' => 'total_sum_validation_lower_than_500_missing_delivery_fee(fes-transportation)',
-                        ], 400);
-                    }
-                } else {
-                    if ($hasDeliveryFee) {
-                        $logService->validationFailed(
-                            techId: $tech_id,
-                            action: 'send_payment_links',
-                            bookId: $book_id,
-                            salesOrderId: $sales_order_id,
-                            message: 'Unexpected delivery fee line for a تركيب/منتجات appointment that does not qualify for it',
-                            requestPayload: $request->all(),
-                            responsePayload: [
-                                'order_type_id' => $orderTypeId,
-                                'total_amount_sum' => $totalAmountSum,
-                                'adjusted_total_amount_sum' => $adjustedTotalAmountSum,
-                            ],
-                            userId: auth()->id(),
-                        );
-
-                        return response()->json([
-                            'status' => false,
-                            'message' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
-                        ], 400);
-                    }
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'total_sum_validation_500_or_more_unexpected_delivery_fee(fes-transportation)',
+                    ], 400);
                 }
             }
 
