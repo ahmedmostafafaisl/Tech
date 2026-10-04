@@ -306,6 +306,15 @@ class NewDirectIntegrationController extends Controller
         // ✅ Fetch stock only for items in salesLines
         $stockMap = $this->buildStockMapForSalesLines($salesLines, $authenticatedUser->warehouse_id);
 
+        // ✅ Serials already used by OTHER appointments of this technician — same rule
+        // as main-warehouse (see reservedSerialsByItem) — are hidden from each line's
+        // available_serials below. This appointment's own picks stay visible, so a
+        // selected serial can still be shown and changed. Skipped when no line is serial.
+        $usedSerialsByItem = [];
+        if (! empty($appointment['Worker']) && collect($salesLines)->contains(fn($l) => (bool) ($l['IsSerial'] ?? false))) {
+            $usedSerialsByItem = $this->reservedSerialsByItem((string) $appointment['Worker'], (string) $bookId);
+        }
+
         // ✅ Appointment bundles by book_id
         $appointmentBundles = AppointmentBundle::query()
             ->with('items')
@@ -340,12 +349,18 @@ class NewDirectIntegrationController extends Controller
         }, collect());
 
         // ✅ Map sales lines with max_quantity, serial data, bundle_id and bundle_name
-        $salesLines = array_map(function ($line) use ($stockMap, $bundleItemMap) {
+        $salesLines = array_map(function ($line) use ($stockMap, $bundleItemMap, $usedSerialsByItem) {
             $itemNumber = strtolower($line['ItemNumber'] ?? '');
             $bundleEntry = $bundleItemMap->get($itemNumber);
 
             $line['max_quantity'] = $stockMap->get($itemNumber)['Quantity'] ?? 0;
             $line = $this->resolveSerialData($line, $stockMap);
+
+            // ✅ hide serials already used by other appointments
+            $line['available_serials'] = \App\Services\Serials\UsedSerialFilter::hide(
+                $line['available_serials'] ?? [],
+                $usedSerialsByItem[strtolower(trim($line['ItemNumber'] ?? ''))] ?? []
+            );
             $line['bundle_id'] = $bundleEntry['bundle_id'] ?? null;
             $line['bundle_name'] = $bundleEntry['bundle_name'] ?? null;
 
@@ -691,6 +706,77 @@ class NewDirectIntegrationController extends Controller
         return $this->setCode(code: 200)->setData($response)->setMessage('Success.')->send();
     }
 
+    /**
+     * Serials this technician has already reserved locally, keyed by lower-cased
+     * item number — the single definition of "used" shared by mainWarehouse() and
+     * singleAppointmentByBookId(), so the two endpoints can't drift apart.
+     *
+     * Window and rule are exactly what mainWarehouse() always used: reservations on
+     * transactions created yesterday-through-today, EXCLUDING appointments the
+     * technician raised a change request on in that window (a cancelled or
+     * rescheduled appointment releases its serials). $exceptBookId additionally
+     * leaves out one appointment's own reservations, so its own picks stay visible
+     * on its own screen.
+     *
+     * @return array<string, array<int, string>>  item_number (lowercase) => cleaned serials
+     */
+    private function reservedSerialsByItem(string $techId, ?string $exceptBookId = null): array
+    {
+        $windowStart = today()->subDay()->startOfDay();
+        $windowEnd   = today()->endOfDay();
+
+        $excludedBookIds = ChangeRequest::query()
+            ->where('tech_id', $techId)
+            ->whereBetween('created_at', [$windowStart, $windowEnd])
+            ->pluck('book_id')
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
+
+        return AppointmentTransactionSerial::query()
+            ->select(
+                'appointment_transaction_serials.item_number',
+                'appointment_transaction_serials.serial'
+            )
+            ->join(
+                'appointment_transaction_lines',
+                'appointment_transaction_lines.id',
+                '=',
+                'appointment_transaction_serials.appointment_transaction_line_id'
+            )
+            ->join(
+                'appointment_transactions',
+                'appointment_transactions.id',
+                '=',
+                'appointment_transaction_lines.appointment_transaction_id'
+            )
+            ->where('appointment_transactions.tech_id', $techId)
+            ->whereBetween('appointment_transactions.created_at', [$windowStart, $windowEnd])
+            ->when(
+                ! empty($excludedBookIds),
+                function ($query) use ($excludedBookIds) {
+                    $query->whereNotIn('appointment_transactions.book_id', $excludedBookIds);
+                }
+            )
+            ->when(
+                $exceptBookId !== null,
+                function ($query) use ($exceptBookId) {
+                    // NULL-safe: a plain "book_id != x" would also drop rows whose book_id is NULL.
+                    $query->where(function ($q) use ($exceptBookId) {
+                        $q->whereNull('appointment_transactions.book_id')
+                            ->orWhere('appointment_transactions.book_id', '!=', $exceptBookId);
+                    });
+                }
+            )
+            ->get()
+            ->groupBy(fn($row) => strtolower(trim($row->item_number)))
+            ->map(fn($rows) => $rows->pluck('serial')
+                ->map(fn($serial) => \App\Services\Serials\UsedSerialFilter::clean($serial))
+                ->toArray())
+            ->toArray();
+    }
+
     public function mainWarehouse(Request $request)
     {
         $validated = Validator::make($request->all(), [
@@ -746,58 +832,11 @@ class NewDirectIntegrationController extends Controller
         })->toArray();
 
         /**
-         * Get book_ids that have change requests today
-         * These appointments should NOT reserve serials
+         * Serials this technician has already reserved (excluding appointments they
+         * raised a change request on) — shared with singleAppointmentByBookId() via
+         * reservedSerialsByItem() so both endpoints use one definition of "used".
          */
-        $excludedBookIds = ChangeRequest::query()
-            ->where('tech_id', $request->workerId)
-            ->whereBetween('created_at', [today()->subDay()->startOfDay(), today()->endOfDay()])
-            ->pluck('book_id')
-            ->filter()
-            ->unique()
-            ->values()
-            ->toArray();
-
-        /**
-         * Get reserved serials for this technician today
-         * excluding appointments that have change requests today
-         */
-        $todayReservedSerials = AppointmentTransactionSerial::query()
-            ->select(
-                'appointment_transaction_serials.item_number',
-                'appointment_transaction_serials.serial'
-            )
-            ->join(
-                'appointment_transaction_lines',
-                'appointment_transaction_lines.id',
-                '=',
-                'appointment_transaction_serials.appointment_transaction_line_id'
-            )
-            ->join(
-                'appointment_transactions',
-                'appointment_transactions.id',
-                '=',
-                'appointment_transaction_lines.appointment_transaction_id'
-            )
-            ->where('appointment_transactions.tech_id', $request->workerId)
-            ->whereBetween('appointment_transactions.created_at', [today()->subDay()->startOfDay(), today()->endOfDay()])
-            ->when(
-                ! empty($excludedBookIds),
-                function ($query) use ($excludedBookIds) {
-                    $query->whereNotIn(
-                        'appointment_transactions.book_id',
-                        $excludedBookIds
-                    );
-                }
-            )
-            ->get()
-            ->groupBy(fn($row) => strtolower(trim($row->item_number)))
-            ->map(function ($rows) use ($cleanSerial) {
-                return $rows->pluck('serial')
-                    ->map(fn($serial) => $cleanSerial($serial))
-                    ->toArray();
-            })
-            ->toArray();
+        $todayReservedSerials = $this->reservedSerialsByItem((string) $request->workerId);
 
         /**
          * Remove reserved serials from warehouse products
