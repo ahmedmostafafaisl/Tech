@@ -306,13 +306,29 @@ class NewDirectIntegrationController extends Controller
         // ✅ Fetch stock only for items in salesLines
         $stockMap = $this->buildStockMapForSalesLines($salesLines, $authenticatedUser->warehouse_id);
 
-        // ✅ Serials already used by OTHER appointments of this technician — same rule
-        // as main-warehouse (see reservedSerialsByItem) — are hidden from each line's
-        // available_serials below. This appointment's own picks stay visible, so a
-        // selected serial can still be shown and changed. Skipped when no line is serial.
+        // ✅ Serials already used are hidden from each line's available_serials below — same rule as
+        // main-warehouse (see reservedSerialsByItem). For an OPEN appointment its own picks stay
+        // visible, so a selected serial can still be shown and changed. For a COMPLETED one they are
+        // consumed, not picks: they are hidden too, whatever the age (they stay in selected_serials).
+        // Skipped when no line is serial.
         $usedSerialsByItem = [];
-        if (! empty($appointment['Worker']) && collect($salesLines)->contains(fn($l) => (bool) ($l['IsSerial'] ?? false))) {
-            $usedSerialsByItem = $this->reservedSerialsByItem((string) $appointment['Worker'], (string) $bookId);
+        $serialItemNumbers = collect($salesLines)
+            ->filter(fn($l) => (bool) ($l['IsSerial'] ?? false))
+            ->pluck('ItemNumber')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if (! empty($appointment['Worker']) && $serialItemNumbers !== []) {
+            $usedSerialsByItem = $this->reservedSerialsByItem((string) $appointment['Worker'], (string) $bookId, $serialItemNumbers);
+
+            if (($appointment['Status'] ?? null) === 'Completed') {
+                $usedSerialsByItem = \App\Services\Serials\UsedSerialWindow::mergeByItem(
+                    $usedSerialsByItem,
+                    $this->serialsOfAppointmentByItem((string) $bookId, $serialItemNumbers)
+                );
+            }
         }
 
         // ✅ Appointment bundles by book_id
@@ -707,37 +723,60 @@ class NewDirectIntegrationController extends Controller
     }
 
     /**
-     * Serials this technician has already reserved locally, keyed by lower-cased
-     * item number — the single definition of "used" shared by mainWarehouse() and
-     * singleAppointmentByBookId(), so the two endpoints can't drift apart.
+     * Serials already used by this technician's appointments, keyed by lower-cased item number
+     * — the single definition of "used" shared by mainWarehouse() and singleAppointmentByBookId().
      *
-     * Window and rule are exactly what mainWarehouse() always used: reservations on
-     * transactions created yesterday-through-today, EXCLUDING appointments the
-     * technician raised a change request on in that window (a cancelled or
-     * rescheduled appointment releases its serials). $exceptBookId additionally
-     * leaves out one appointment's own reservations, so its own picks stay visible
-     * on its own screen.
+     * A serial counts as used when it sits on one of the technician's appointment transactions and
+     * EITHER the transaction was created yesterday-through-today (in progress, or just finished —
+     * the window main-warehouse has always used), OR its appointment is COMPLETED
+     * (direct_appointments.complete_flag = 1) and the transaction is at most
+     * `used_serials_completed_window_days` old (a settings row; default 90; 0 = the old 2-day rule).
+     * The second case exists because DY keeps listing a consumed serial on the technician's
+     * warehouse for days after the appointment completes (seen: 6+ days), so a 2-day window made
+     * finished-job serials look available again. It is bounded so a serial that really returns to
+     * stock stops being hidden. The rule itself is UsedSerialWindow (pure, unit-tested).
      *
+     * Appointments the technician raised a change request on recently are excluded (a cancelled or
+     * rescheduled appointment releases its serials). $exceptBookId leaves out one appointment's own
+     * reservations; $itemNumbers limits the lookup to the items actually being displayed.
+     *
+     * @param  array<int, string>|null  $itemNumbers
      * @return array<string, array<int, string>>  item_number (lowercase) => cleaned serials
      */
-    private function reservedSerialsByItem(string $techId, ?string $exceptBookId = null): array
+    private function reservedSerialsByItem(string $techId, ?string $exceptBookId = null, ?array $itemNumbers = null): array
     {
-        $windowStart = today()->subDay()->startOfDay();
+        if ($itemNumbers !== null && $itemNumbers === []) {
+            return [];
+        }
+
+        $now           = now();
+        $completedDays = max(0, (int) Setting::get(
+            'used_serials_completed_window_days',
+            \App\Services\Serials\UsedSerialWindow::DEFAULT_COMPLETED_DAYS
+        ));
+        $windowStart = \App\Services\Serials\UsedSerialWindow::fetchStart($now, $completedDays);
+        $recentStart = \App\Services\Serials\UsedSerialWindow::recentStart($now);
         $windowEnd   = today()->endOfDay();
 
         $excludedBookIds = ChangeRequest::query()
             ->where('tech_id', $techId)
-            ->whereBetween('created_at', [$windowStart, $windowEnd])
+            ->whereBetween('created_at', [$recentStart, $windowEnd])
             ->pluck('book_id')
             ->filter()
             ->unique()
             ->values()
             ->toArray();
 
-        return AppointmentTransactionSerial::query()
+        $rows = AppointmentTransactionSerial::query()
             ->select(
                 'appointment_transaction_serials.item_number',
-                'appointment_transaction_serials.serial'
+                'appointment_transaction_serials.serial',
+                'appointment_transactions.created_at as tx_created_at'
+            )
+            ->selectRaw(
+                'EXISTS (SELECT 1 FROM direct_appointments'
+                    . ' WHERE direct_appointments.book_id = appointment_transactions.book_id'
+                    . ' AND direct_appointments.complete_flag = 1) AS tx_completed'
             )
             ->join(
                 'appointment_transaction_lines',
@@ -769,12 +808,57 @@ class NewDirectIntegrationController extends Controller
                     });
                 }
             )
-            ->get()
-            ->groupBy(fn($row) => strtolower(trim($row->item_number)))
-            ->map(fn($rows) => $rows->pluck('serial')
-                ->map(fn($serial) => \App\Services\Serials\UsedSerialFilter::clean($serial))
-                ->toArray())
-            ->toArray();
+            ->when(
+                $itemNumbers !== null,
+                function ($query) use ($itemNumbers) {
+                    $query->whereIn('appointment_transaction_serials.item_number', $itemNumbers);
+                }
+            )
+            ->get();
+
+        return \App\Services\Serials\UsedSerialWindow::groupUsed($rows, $now, $completedDays);
+    }
+
+    /**
+     * ONE appointment's own recorded serials, keyed by lower-cased item number, whatever their age.
+     * Used for a COMPLETED appointment, whose serials are consumed rather than selectable.
+     *
+     * @param  array<int, string>|null  $itemNumbers
+     * @return array<string, array<int, string>>
+     */
+    private function serialsOfAppointmentByItem(string $bookId, ?array $itemNumbers = null): array
+    {
+        if ($itemNumbers !== null && $itemNumbers === []) {
+            return [];
+        }
+
+        $rows = AppointmentTransactionSerial::query()
+            ->select(
+                'appointment_transaction_serials.item_number',
+                'appointment_transaction_serials.serial'
+            )
+            ->join(
+                'appointment_transaction_lines',
+                'appointment_transaction_lines.id',
+                '=',
+                'appointment_transaction_serials.appointment_transaction_line_id'
+            )
+            ->join(
+                'appointment_transactions',
+                'appointment_transactions.id',
+                '=',
+                'appointment_transaction_lines.appointment_transaction_id'
+            )
+            ->where('appointment_transactions.book_id', $bookId)
+            ->when(
+                $itemNumbers !== null,
+                function ($query) use ($itemNumbers) {
+                    $query->whereIn('appointment_transaction_serials.item_number', $itemNumbers);
+                }
+            )
+            ->get();
+
+        return \App\Services\Serials\UsedSerialWindow::groupAll($rows);
     }
 
     public function mainWarehouse(Request $request)
@@ -836,7 +920,11 @@ class NewDirectIntegrationController extends Controller
          * raised a change request on) — shared with singleAppointmentByBookId() via
          * reservedSerialsByItem() so both endpoints use one definition of "used".
          */
-        $todayReservedSerials = $this->reservedSerialsByItem((string) $request->workerId);
+        $todayReservedSerials = $this->reservedSerialsByItem(
+            (string) $request->workerId,
+            null,
+            collect($products)->pluck('ItemNumber')->filter()->unique()->values()->all()
+        );
 
         /**
          * Remove reserved serials from warehouse products
