@@ -146,9 +146,6 @@ RUN mkdir -p /var/www/.local/share/applications \
 RUN composer install --no-interaction --no-progress --no-dev --prefer-dist \
     && composer clear-cache
 
-# Download Opcache Status script
-RUN wget -O /var/www/html/public/opcache.php https://raw.githubusercontent.com/rlerdorf/opcache-status/master/opcache.php
-
 # Expose port
 EXPOSE 8000
 
