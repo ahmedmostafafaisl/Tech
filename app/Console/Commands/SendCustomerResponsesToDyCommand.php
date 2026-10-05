@@ -6,6 +6,7 @@ use App\Models\PreAppointmentMessage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use App\Services\DY365\DyService;
+use App\Services\WhatsApp\CustomerResponseRequest;
 
 class SendCustomerResponsesToDyCommand extends Command
 {
@@ -47,23 +48,9 @@ class SendCustomerResponsesToDyCommand extends Command
                 continue;
             }
 
-            $requestBody = [
-                '_contract' => [
-                    'bookId'       => $msg->book_id ?? null,
-                    'salesOrderId' => $msg->sales_order ?? null,
-                    'actionOwner'  => 2,
-                ],
-            ];
-
-            // map response to requestType
-            match ($customerResponse) {
-                'confirm'    => $requestBody['_contract']['requestType'] = 2,
-                'cancel'     => $requestBody['_contract']['requestType'] = 0,
-                'reschedule' => $requestBody['_contract']['requestType'] = 1,
-                default      => $requestBody['_contract']['requestType'] = null,
-            };
-
-            if ($requestBody['_contract']['requestType'] === null) {
+            try {
+                $requestBody = CustomerResponseRequest::body($msg->book_id, $msg->sales_order, (string) $customerResponse);
+            } catch (\InvalidArgumentException $e) {
                 $this->error("❌ Unknown customer_response: {$customerResponse} for {$salesOrder}");
                 Log::channel('whatsapp')->warning('Unknown customer_response', [
                     'sales_order' => $salesOrder,
@@ -79,31 +66,27 @@ class SendCustomerResponsesToDyCommand extends Command
             ]);
 
             try {
-                // ✅ use sendRequest3 style? adapt to your dyService method:
-                $dyResponse = $this->dyService->sendRequest3(
-                    'post',
-                    $this->dyService->customerChangeRequest,
-                    $requestBody
-                );
+                // One time-limited attempt. A change request is not idempotent, and this used to
+                // wait up to 500s and resend it up to 3 times (sendRequest3 with retries).
+                $outcome = $this->dyService->submitCustomerChangeRequestWithin($requestBody, 90);
+                $record  = CustomerResponseRequest::record($outcome);
 
                 // log dy response always
                 Log::channel('whatsapp')->info('📥 DY response', [
                     'sales_order' => $salesOrder,
-                    'dy_response' => $dyResponse,
+                    'dy_response' => $record['dy_response'],
                 ]);
 
-                // store dy_response + flag on message (optional but recommended)
-                $ok = ($dyResponse['ok'] ?? false) === true
-                    && (data_get($dyResponse, 'data.Status') === true);
+                $ok = $record['flag'] === 1;
 
                 $msg->update([
-                    'flag'        => $ok ? 1 : 0,
-                    'dy_response' => json_encode($dyResponse, JSON_UNESCAPED_UNICODE),
+                    'flag'        => $record['flag'],
+                    'dy_response' => json_encode($record['dy_response'], JSON_UNESCAPED_UNICODE),
                 ]);
 
                 $ok
                     ? $this->info("✅ Sent: {$salesOrder}")
-                    : $this->error("❌ Failed: {$salesOrder}");
+                    : $this->error("❌ Failed: {$salesOrder} ({$record['dy_response']['outcome']})");
             } catch (\Throwable $e) {
                 Log::channel('whatsapp')->error('❌ DY send customer response exception', [
                     'sales_order' => $salesOrder,

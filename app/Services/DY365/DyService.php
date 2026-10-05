@@ -33,6 +33,9 @@ class DyService
     private $getCustomers;
     private $smsService;
 
+    /** Set by requestDynamics(): does its last failure say DY is unhealthy? (see DyFailureKind) */
+    private bool $lastFailureCounts = true;
+
     private $getTechnicianTransfers; // new
 
     //     new
@@ -180,6 +183,34 @@ class DyService
             return $cached;
         }
 
+        // The token lapses about once an hour, and at that moment every concurrent request used
+        // to fetch its own new one at once (a stampede that risks Azure AD throttling). Now one
+        // request fetches while the others wait, then read what it cached. Locks are best-effort:
+        // if the cache driver has none, or the wait times out, fall back to fetching directly —
+        // a request is never blocked on the lock.
+        $wait = DyRequestBudget::active()
+            ? (int) floor(min(8.0, DyRequestBudget::remaining() - 1))
+            : 8;
+
+        if ($wait < 1) {
+            return $this->fetchToken($cacheKey);
+        }
+
+        try {
+            return Cache::lock($this->ck('oauth:lock'), 20)->block($wait, function () use ($cacheKey) {
+                $cached = Cache::get($cacheKey); // filled by whoever held the lock before us
+
+                return !empty($cached) ? $cached : $this->fetchToken($cacheKey);
+            });
+        } catch (\Throwable $e) { // LockTimeoutException, or a cache driver without lock support
+            $cached = Cache::get($cacheKey);
+
+            return !empty($cached) ? $cached : $this->fetchToken($cacheKey);
+        }
+    }
+
+    private function fetchToken(string $cacheKey): ?string
+    {
         $body = [
             "grant_type"    => "client_credentials",
             "client_id"     => $this->clientId,
@@ -253,16 +284,38 @@ class DyService
         };
     }
 
+    /**
+     * Why getToken() came back empty. When the request's own time budget ran out before a token
+     * could be fetched, that is not an authentication failure and must not look like one — it
+     * would count toward the circuit breaker (see DyFailureKind).
+     */
+    private function missingTokenMessage(): string
+    {
+        return DyRequestBudget::exhausted() ? 'DY request budget exhausted' : 'Missing access token';
+    }
+
+    /** Does this failure say DY (or our connection to it) is unhealthy? See DyFailureKind. */
+    private function failureCounts(\Throwable $e): bool
+    {
+        $status = match (true) {
+            $e instanceof DyRequestFailed  => $e->status,
+            $e instanceof RequestException => $e->response?->status(),
+            default                        => null,
+        };
+
+        return DyFailureKind::countsAgainstBreaker($status, $e instanceof ConnectionException, $e->getMessage());
+    }
+
     private function sendRequest(string $method, string $endpoint, array $data = [], bool $safeToRetry = true)
     {
-        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'];
+        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? __FUNCTION__;
 
         $payload = empty($data) ? new \stdClass() : $data;
 
         try {
             $token = $this->getToken();
             if (!$token) {
-                throw new \RuntimeException("Missing access token");
+                throw new \RuntimeException($this->missingTokenMessage());
             }
 
             $doRequest = function (string $token) use ($method, $endpoint, $payload, $safeToRetry) {
@@ -298,13 +351,13 @@ class DyService
     }
     public function sendRequest2($method, $endpoint, $data = [])
     {
-        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'];
+        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? __FUNCTION__;
 
         try {
             $token = $this->getToken();
 
             if (!$token) {
-                throw new \Exception("Missing access token");
+                throw new \RuntimeException($this->missingTokenMessage());
             }
 
             // Convert to JSON string (ensures raw JSON sent)
@@ -343,32 +396,59 @@ class DyService
         }
     }
     //  new send request functions
-    public function sendRequest3($method, $endpoint, $data = [])
+    /**
+     * Public low-level call that returns a structured result instead of null / throwing:
+     *   ['ok' => true,  'status' => 200,           'data'  => <json>]
+     *   ['ok' => false, 'status' => <http status>, 'error' => <json|message>]
+     * and, for transport failures only, an extra 'outcome' (see DyTransportOutcome).
+     *
+     * Used by the technician-list calls. It used to wait up to 500s (300s just to connect),
+     * retry EVERY failure — plain 400/404 included — three times, never refresh the token,
+     * and report the final HTTP error as status 500. It now has the same bounded timeouts,
+     * retry policy, 401 refresh and request-budget handling as the other helpers.
+     *
+     * @param bool $safeToRetry     false for writes (see DyRetryPolicy)
+     * @param int  $timeoutSeconds  per-attempt limit; a 400-technician page may legitimately need more than 60s
+     */
+    public function sendRequest3($method, $endpoint, $data = [], bool $safeToRetry = true, int $timeoutSeconds = 120)
     {
-        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'];
+        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? __FUNCTION__;
 
         try {
             $token = $this->getToken();
 
             if (!$token) {
-                throw new \Exception("Missing access token");
+                throw new \RuntimeException($this->missingTokenMessage());
             }
 
             $jsonPayload = json_encode($data, JSON_UNESCAPED_UNICODE);
 
             $url = $this->baseUrl . $endpoint;
 
-            $response = Http::retry(3, 2000)
-                ->withOptions([
-                    'timeout' => 500,
-                    'connect_timeout' => 300,
-                ])
-                ->withHeaders([
-                    'Authorization' => "Bearer $token",
-                    'Content-Type'  => 'application/json',
-                ])
-                ->withBody($jsonPayload, 'application/json')
-                ->send($method, $url);
+            $send = function (string $token) use ($method, $url, $jsonPayload, $safeToRetry, $timeoutSeconds) {
+                [$timeoutSec, $attempts] = DyRequestBudget::plan($timeoutSeconds, 2);
+
+                return Http::withToken($token)
+                    ->connectTimeout(min(5, $timeoutSec))
+                    ->timeout($timeoutSec)
+                    ->retry($attempts, 1000, $this->retryWhen($safeToRetry), throw: false)
+                    ->withBody($jsonPayload, 'application/json')
+                    ->send($method, $url);
+            };
+
+            $response = $send($token);
+
+            // Token expired/rejected — refresh once and retry (this helper never did)
+            if ($response->status() === 401) {
+                Cache::forget($this->ck('oauth:access_token'));
+                $token = $this->getToken();
+
+                if (!$token) {
+                    throw new \Exception("Token refresh failed after 401");
+                }
+
+                $response = $send($token);
+            }
 
             // ❌ لو فشل
             if ($response->failed()) {
@@ -403,13 +483,20 @@ class DyService
                 'error'    => $e->getMessage(),
             ]);
 
-            return [
+            $result = [
                 'ok'     => false,
                 'status' => 500,
                 'error'  => [
                     'message' => $e->getMessage()
                 ]
             ];
+
+            // lets the caller tell "DY may have it" (unconfirmed) from "DY never got it" (not_sent)
+            if ($e instanceof ConnectionException) {
+                $result['outcome'] = DyTransportOutcome::fromTransportError($e->getMessage())['outcome'];
+            }
+
+            return $result;
         }
     }
 
@@ -457,6 +544,16 @@ class DyService
             ];
 
             $response = $this->sendRequest3('post', $this->getTechnicians, $payload);
+
+            // A failed page is NOT "no more technicians". Breaking out and returning what we
+            // had made a DY error look like a short — or completely empty — list.
+            if (($response['ok'] ?? false) !== true) {
+                throw new DyRequestFailed(
+                    'Dynamics technician list failed on page ' . $currentPage . ': '
+                        . json_encode($response['error'] ?? null, JSON_UNESCAPED_UNICODE),
+                    $response['status'] ?? null
+                );
+            }
 
             $data = $response['data']['Data'] ?? null;
 
@@ -851,13 +948,14 @@ class DyService
 
     private function requestDynamics(string $method, string $endpoint, array $data = [], bool $safeToRetry = true): ?array
     {
-        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'];
+        $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? __FUNCTION__;
+        $this->lastFailureCounts = true; // reset; only a non-counting failure (e.g. a 404) clears it below
         $payload = empty($data) ? new \stdClass() : $data;
 
         try {
             $token = $this->getToken();
             if (!$token) {
-                throw new \RuntimeException("Missing access token");
+                throw new \RuntimeException($this->missingTokenMessage());
             }
 
             $send = function (string $token) use ($method, $endpoint, $payload, $safeToRetry) {
@@ -890,6 +988,7 @@ class DyService
             $this->logError($functionName, $e->getMessage(), [
                 'endpoint' => $endpoint,
             ]);
+            $this->lastFailureCounts = $this->failureCounts($e);
             return null;
         }
     }
@@ -903,7 +1002,7 @@ class DyService
             $token = $this->getToken();
 
             if (!$token) {
-                throw new \RuntimeException('Missing access token');
+                throw new \RuntimeException($this->missingTokenMessage());
             }
 
             $send = function (string $token) use ($method, $endpoint, $payload, $safeToRetry): Response {
@@ -950,12 +1049,13 @@ class DyService
                     'body'     => $body,
                 ]);
 
-                throw new \RuntimeException(
+                throw new DyRequestFailed(
                     $body['message']
                         ?? $body['Message']
                         ?? $body['error']['message']
                         ?? $response->body()
-                        ?? 'Dynamics request failed'
+                        ?? 'Dynamics request failed',
+                    $response->status()
                 );
             }
 
@@ -988,8 +1088,11 @@ class DyService
             $fresh = $call();
 
             if ($fresh === null) {
-                // Callable returned null (e.g. empty Dynamics response)
-                Cache::put($breakerKey, $fails + 1, now()->addSeconds(60));
+                // Callable returned null (e.g. empty Dynamics response). requestDynamics() records
+                // whether the underlying failure counts (a 404 for one book id must not).
+                if ($this->lastFailureCounts) {
+                    Cache::put($breakerKey, $fails + 1, now()->addSeconds(60));
+                }
                 return Cache::get($cacheKey); // stale fallback
             }
 
@@ -999,13 +1102,19 @@ class DyService
 
             return $fresh;
         } catch (\Throwable $e) {
-            // Exception (ConnectionException, RuntimeException, etc.)
-            Cache::put($breakerKey, $fails + 1, now()->addSeconds(60));
+            // Exception (ConnectionException, RuntimeException, etc.). Only failures that say DY is
+            // unhealthy count toward the breaker — a 404 for one book id must not make every other
+            // lookup fail for a minute (see DyFailureKind).
+            $counted = $this->failureCounts($e);
 
-            $this->logError('callCached', 'Call failed — incrementing breaker', [
+            if ($counted) {
+                Cache::put($breakerKey, $fails + 1, now()->addSeconds(60));
+            }
+
+            $this->logError('callCached', $counted ? 'Call failed — incrementing breaker' : 'Call failed — not counted toward breaker', [
                 'cache_key'   => $cacheKey,
                 'breaker_key' => $breakerKey,
-                'fails'       => $fails + 1,
+                'fails'       => $counted ? $fails + 1 : $fails,
                 'error'       => $e->getMessage(),
             ]);
 
@@ -1063,7 +1172,10 @@ class DyService
         try {
             $response = $call();
         } catch (\Throwable $e) {
-            Cache::put($breakerKey, $fails + 1, now()->addSeconds(60));
+            if ($this->failureCounts($e)) {
+                Cache::put($breakerKey, $fails + 1, now()->addSeconds(60));
+            }
+
             return Cache::get($staleKey);
         }
 
@@ -1116,22 +1228,21 @@ class DyService
         );
     }
 
+    /**
+     * A WRITE — so it is never served from the read cache or stopped by a read breaker.
+     * It used to go through a 3s-fresh / 10-minute-stale cache and a breaker shared by every
+     * lead: five failures (bad TargetIds, say) made every score update silently return null for
+     * a minute without calling DY, and a failure could hand back an old success response.
+     * Returns DY's answer, or ['Error' => message] when the call failed, so callers can tell it
+     * did not happen. $freshTtlSeconds is kept only so existing callers still compile.
+     */
     public function updateCallListScore(array $payload = [], int $freshTtlSeconds = 3): ?array
     {
-        $baseKey = $this->cacheKey('updateCallListScore', $payload);
-
-        $freshKey   = $baseKey . ':fresh';
-        $staleKey   = $baseKey . ':stale';
-        $breakerKey = $this->ck('breaker:updateCallListScore');
-
-        return $this->callCachedWithStale(
-            $freshKey,
-            $staleKey,
-            $breakerKey,
-            $freshTtlSeconds,
-            600, // stale 10 minutes
-            fn() => $this->requestDynamics2('post', $this->updateCallListScore, $payload)
-        );
+        try {
+            return $this->requestDynamics2('post', $this->updateCallListScore, $payload);
+        } catch (\Throwable $e) {
+            return ['Error' => $e->getMessage()];
+        }
     }
 
     // get Products with caching and circuit breaker

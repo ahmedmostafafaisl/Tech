@@ -5,6 +5,7 @@ namespace App\Services\Direct_appointment;
 use App\Models\DirectAppointment;
 use Throwable;
 use App\Services\DY365\DyService;
+use App\Services\WhatsApp\CustomerResponseRequest;
 use Illuminate\Support\Facades\Log;
 use App\Services\CheckCompleteStatus\CheckCompleteService;
 use App\Repositories\Interfaces\DashboardRepositoryInterface;
@@ -83,15 +84,16 @@ class DirectAppointmentService
     public function sendCustomerResponse(string $salesOrder): array
     {
         try {
-            $appointment = $this->repo->getLatestBySalesOrder($salesOrder);
-            $customerResponse = $appointment?->customer_response;
+            $message = $this->repo->getLatestBySalesOrder($salesOrder);
 
-            if (!$appointment) {
+            if (!$message) {
                 return [
                     'success' => false,
                     'message' => 'Appointment not found'
                 ];
             }
+
+            $customerResponse = $message->customer_response;
 
             if ($customerResponse == "pending") {
                 return [
@@ -99,44 +101,54 @@ class DirectAppointmentService
                     'message' => 'Customer has no response to process'
                 ];
             }
-            $requestBody = [
-                '_contract' => [
-                    'bookId'        => $appointment->book_id,
-                    'salesOrderId'  => $appointment->sales_order,
-                    'actionOwner'   => 2,
-                ]
-            ];
 
-            match ($customerResponse) {
-                'confirm'    => $requestBody['_contract']['requestType'] = 2,
-                'cancel'     => $requestBody['_contract']['requestType'] = 0,
-                'reschedule' => $requestBody['_contract']['requestType'] = 1,
-            };
+            try {
+                $requestBody = CustomerResponseRequest::body(
+                    $message->book_id,
+                    $message->sales_order,
+                    (string) $customerResponse
+                );
+            } catch (\InvalidArgumentException $e) {
+                return [
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ];
+            }
 
             Log::channel('whatsapp')->info('📤 Sending request to Dy365', [
                 'sales_order' => $salesOrder,
                 'request'     => $requestBody,
             ]);
 
-            $response = $this->dyService->sendRequest3(
-                'post',
-                $this->dyService->customerChangeRequest,
-                $requestBody
-            );
+            // This runs inside a dashboard request, so it gets ONE attempt limited to what a web
+            // request can wait for. It used to wait up to 500s x 3 retries — resending a change
+            // request DY may already have processed — and reported success even when DY answered
+            // Status:false. The result is now recorded on the message exactly like the WhatsApp
+            // webhook and dy:send-customer-responses record theirs.
+            $outcome = $this->dyService->submitCustomerChangeRequestWithin($requestBody, 55);
+            $record  = CustomerResponseRequest::record($outcome);
 
-            if ($response['ok'] === false) {
+            $message->update([
+                'flag'        => $record['flag'],
+                'dy_response' => json_encode($record['dy_response'], JSON_UNESCAPED_UNICODE),
+            ]);
+
+            if ($record['flag'] !== 1) {
+                Log::channel('whatsapp')->error('❌ Dy365 did not confirm the customer response', [
+                    'sales_order' => $salesOrder,
+                    'dy_response' => $record['dy_response'],
+                ]);
 
                 return [
                     'success' => false,
-                    'message' => $response['error']['Message']
-                        ?? 'Dy365 rejected the request',
-                    'dy'      => $response['error'],
+                    'message' => $this->customerResponseFailureMessage($record['dy_response']),
+                    'dy'      => $record['dy_response'],
                 ];
             }
 
             Log::channel('whatsapp')->info('📥 Response received from Dy365', [
                 'sales_order' => $salesOrder,
-                'response'    => is_array($response) ? $response : $response->json(),
+                'response'    => $record['dy_response'],
             ]);
 
             return [
@@ -156,6 +168,20 @@ class DirectAppointmentService
                 'message' => $e->getMessage()
             ];
         }
+    }
+
+    /** What to tell the dashboard user when DY did not confirm the customer response. */
+    private function customerResponseFailureMessage(array $dyResponse): string
+    {
+        return match ($dyResponse['outcome'] ?? null) {
+            'unconfirmed' => 'The request was sent to Dynamics but no confirmation arrived in time — check Dynamics before sending it again.',
+            'not_sent'    => 'Could not reach Dynamics — nothing was sent, it is safe to try again.',
+            default       => $dyResponse['error']['Message']
+                ?? $dyResponse['error']['Error']
+                ?? $dyResponse['data']['Error']
+                ?? $dyResponse['data']['Message']
+                ?? 'Dy365 rejected the request',
+        };
     }
 
 

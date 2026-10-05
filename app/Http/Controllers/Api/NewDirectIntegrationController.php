@@ -4622,7 +4622,26 @@ class NewDirectIntegrationController extends Controller
             ]);
         }
 
-        $technicians = $this->dyService->getTechniciansByPrimaryWarehouse($mainWarehouseId);
+        // Time box: answer within ~60s however slow DY is (Cloudflare gives up at ~100s). A DY
+        // failure used to come back as status:true with an EMPTY list, which the app showed as
+        // "no technicians"; it is now a 503 so the app can tell the difference.
+        \App\Services\DY365\DyRequestBudget::begin(55);
+
+        try {
+            $technicians = $this->dyService->getTechniciansByPrimaryWarehouse($mainWarehouseId);
+        } catch (\Throwable $e) {
+            Log::warning('techniciansByPrimaryWarehouse: Dynamics technician list failed', [
+                'main_warehouse_id' => $mainWarehouseId,
+                'error'             => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status'  => false,
+                'message' => 'Dynamics technician list is unavailable right now. Please try again.',
+            ], 503);
+        } finally {
+            \App\Services\DY365\DyRequestBudget::clear();
+        }
 
         // Find the AUTHENTICATED user's own entry within this same raw
         // list (before exclusion) to get their TechnicianDepartment —
