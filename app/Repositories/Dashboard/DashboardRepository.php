@@ -2,6 +2,7 @@
 
 namespace App\Repositories\Dashboard;
 
+use App\Helper\DashboardDates;
 use App\Models\AppointmentTransaction;
 use App\Models\DirectAppointment;
 use App\Models\DirectAppointmentPayment;
@@ -89,7 +90,7 @@ class DashboardRepository implements DashboardRepositoryInterface
         // If sales_order_id or book_id is provided, return only 1 latest record
         if ($request->filled('sales_order_id') || $request->filled('book_id')) {
             $latestRecord = $query->first(); // get latest record
-            $items = $latestRecord ? [$latestRecord] : [];
+            $items = $this->withFormattedDates($latestRecord ? [$latestRecord] : []);
 
             return [
                 'items' => $items,
@@ -105,9 +106,10 @@ class DashboardRepository implements DashboardRepositoryInterface
                 ],
             ];
         }
-
+        $query->orderByDesc('updated_at')->orderByDesc('id');
         // Otherwise, paginate normally
         $result = $this->paginate($query, $request);
+        $result['items'] = $this->withFormattedDates($result['items']);
 
         // Add counts to the paginated result
         $result['counts'] = [
@@ -170,111 +172,6 @@ class DashboardRepository implements DashboardRepositoryInterface
             ->get();
     }
 
-    // public function getAllPreMessages(Request $request): array
-    // {
-    //     $query = PreAppointmentMessage::query();
-
-    //     // 🔍 Filter by phone
-    //     if ($request->filled('phone')) {
-    //         $query->where('phone', 'like', "%{$request->phone}%")
-    //             ->latest('created_at');
-    //     }
-
-    //     // 🔍 Filter by sales_order
-    //     if ($request->filled('sales_order')) {
-    //         $query->where('sales_order', $request->sales_order)
-    //             ->latest('created_at');
-    //     }
-
-    //     // 🔍 Filter by book_id
-    //     if ($request->filled('book_id')) {
-    //         $query->where('book_id', $request->book_id)
-    //             ->latest('created_at');
-    //     }
-
-    //     // 📅 Filter by a single exact date
-    //     if ($request->filled('date')) {
-    //         $query->whereDate('date', Carbon::parse($request->date)->toDateString());
-    //     }
-
-    //     // 📅 Filter by date range — each bound now works independently
-    //     if ($request->filled('from_date')) {
-    //         $query->where('created_at', '>=', Carbon::parse($request->from_date)->startOfDay());
-    //     }
-
-    //     if ($request->filled('to_date')) {
-    //         $query->where('created_at', '<=', Carbon::parse($request->to_date)->endOfDay());
-    //     }
-
-    //     // ✅ Filter by is_sent
-    //     if ($request->filled('is_sent')) {
-    //         $query->where('is_sent', $request->boolean('is_sent'));
-    //     }
-
-    //     // 👤 Filter by customer_response
-    //     if ($request->filled('customer_response')) {
-    //         $query->where('customer_response', $request->customer_response);
-    //     }
-
-    //     // 🧮 Counts (always calculated)
-    //     $total_sent = PreAppointmentMessage::where('is_sent', true)
-    //         ->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()])
-    //         ->count();
-    //     $total_pending = PreAppointmentMessage::where('customer_response', 'pending')
-    //         ->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()])
-    //         ->count();
-    //     $total_confirmed = PreAppointmentMessage::where('customer_response', 'confirm')
-    //         ->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()])
-    //         ->count();
-    //     $total_rescheduled = PreAppointmentMessage::where('customer_response', 'reschedule')
-    //         ->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()])
-    //         ->count();
-    //     $total_cancelled = PreAppointmentMessage::where('customer_response', 'cancel')
-    //         ->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()])
-    //         ->count();
-
-
-    //     // 🎯 If exact identifiers provided → return latest single record
-    //     if (
-    //         $request->filled('sales_order') ||
-    //         $request->filled('book_id') ||
-    //         $request->filled('phone')
-    //     ) {
-    //         $latestRecord = $query->first();
-    //         $items = $latestRecord ? [$latestRecord] : [];
-
-    //         return [
-    //             'items' => $items,
-    //             'pagination' => [
-    //                 'current_page' => 1,
-    //                 'total_pages'  => 1,
-    //                 'per_page'     => 1,
-    //                 'total_items'  => count($items),
-    //             ],
-    //             'counts' => [
-    //                 'total_sent'        => $total_sent,
-    //                 'total_pending'     => $total_pending,
-    //                 'total_confirmed'   => $total_confirmed,
-    //                 'total_rescheduled' => $total_rescheduled,
-    //                 'total_cancelled'   => $total_cancelled,
-    //             ],
-    //         ];
-    //     }
-
-    //     // 📦 Normal pagination
-    //     $result = $this->paginate($query, $request);
-
-    //     // ➕ Append counts
-    //     $result['counts'] = [
-    //         'total_sent'        => $total_sent,
-    //         'total_pending'     => $total_pending,
-    //         'total_confirmed'   => $total_confirmed,
-    //         'total_rescheduled' => $total_rescheduled,
-    //         'total_cancelled'   => $total_cancelled,
-    //     ];
-
-    //     return $result;
-    // }
 
 
     public function getPreMessageById(int $id): ?PreAppointmentMessage
@@ -289,6 +186,32 @@ class DashboardRepository implements DashboardRepositoryInterface
         return PreAppointmentMessage::where('sales_order', $salesOrder)
             ->latest()
             ->first();
+    }
+
+    /**
+     * created_at / updated_at as "Y-m-d H:i:s" (app timezone) instead of Laravel's default
+     * ISO-8601 UTC. Done on the models' array form so eager-loaded relations (e.g. technician)
+     * are formatted too. Only used by getDirectAppointments() and getAllPreMessages(), so every
+     * other endpoint — the Power BI feed and getPreMessageById() included — keeps its format.
+     *
+     * $asObjects: PreAppointmentMessageResource reads properties ($this->created_at), so the
+     * pre-message list needs objects; the direct-appointment list is serialised as-is, so arrays.
+     * (Either way the values equal what the models' attributes held — PreAppointmentMessage
+     * has no $hidden / $casts / accessors, so toArray() drops and changes nothing else.)
+     *
+     * @param  iterable<\Illuminate\Database\Eloquent\Model>  $models
+     * @return array<int, array|object>
+     */
+    private function withFormattedDates(iterable $models, bool $asObjects = false): array
+    {
+        $out = [];
+
+        foreach ($models as $model) {
+            $row   = DashboardDates::timestamps($model->toArray());
+            $out[] = $asObjects ? (object) $row : $row;
+        }
+
+        return $out;
     }
 
     private function paginate($query, Request $request): array
@@ -423,7 +346,7 @@ class DashboardRepository implements DashboardRepositoryInterface
             $request->filled('phone')
         ) {
             $latestRecord = $query->first();
-            $items = $latestRecord ? [$latestRecord] : [];
+            $items = $this->withFormattedDates($latestRecord ? [$latestRecord] : [], asObjects: true);
 
             return [
                 'items' => $items,
@@ -443,8 +366,14 @@ class DashboardRepository implements DashboardRepositoryInterface
             ];
         }
 
-        // 📦 Normal pagination
+        // 📦 Normal pagination — most recently updated first. id is the tie-breaker so rows
+        // sharing an updated_at (a bulk send stamps many at once) keep a stable order across
+        // pages instead of repeating or skipping. The ordering lives HERE, not in
+        // buildFilteredPreMessagesQuery(), because the chunked Excel export shares that builder.
+        $query->orderByDesc('updated_at')->orderByDesc('id');
+
         $result = $this->paginate($query, $request);
+        $result['items'] = $this->withFormattedDates($result['items'], asObjects: true);
 
         // ➕ Append counts
         $result['counts'] = [
