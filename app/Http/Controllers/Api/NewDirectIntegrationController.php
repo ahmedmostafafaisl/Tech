@@ -3171,6 +3171,8 @@ class NewDirectIntegrationController extends Controller
         // at ~100s). The DY call below gets whatever is left of this window.
         $requestDeadline = microtime(true) + 55;
         \App\Services\DY365\DyRequestBudget::begin(55);
+        $changeRequestGuard   = app(\App\Services\ChangeRequest\PendingChangeRequestGuard::class);
+        $changeRequestLockKey = null; // set only if THIS request wins the in-flight claim
 
         $logService = app(TechnicianAppointmentLogService::class);
 
@@ -3246,6 +3248,77 @@ class NewDirectIntegrationController extends Controller
                 );
 
                 throw $e;
+            }
+
+            // ✅ Repeat guard. While DY is slow every attempt ends "sent, unconfirmed"
+            // and the technician taps again; each tap used to create another
+            // ChangeRequest and another DY call (20 appointments were sent 2-4 times
+            // in the first 14 minutes). Nothing has been written or uploaded yet, so
+            // a repeat can be answered immediately and cheaply.
+            $requestTypeInt = (int) $data['requestType'];
+
+            // (a) an identical request is still in flight (a timed-out attempt stays
+            //     open ~53s, so quick re-taps arrive before it has recorded anything)
+            $changeRequestLockKey = $changeRequestGuard->claim(
+                (string) $data['bookId'],
+                (string) $data['sales_order_id'],
+                $requestTypeInt
+            );
+
+            if ($changeRequestLockKey === null) {
+                $logService->log(
+                    techId: $techId,
+                    action: 'submit_change_request',
+                    status: 'duplicate_suppressed',
+                    bookId: $bookId,
+                    salesOrderId: $data['sales_order_id'],
+                    message: 'Identical change request already being sent — not sent again',
+                    requestPayload: $requestPayloadForLog,
+                    userId: auth()->id(),
+                    meta: ['reason' => 'in_flight'],
+                );
+
+                return response()->json([
+                    'status'       => true,
+                    'sent_to_dy'   => true,
+                    'dy_confirmed' => false,
+                    'duplicate'    => true,
+                    'message'      => 'The same request is already being sent to Dynamics. It was not sent again.',
+                ], 202);
+            }
+
+            // (b) an identical request was already sent and is awaiting confirmation
+            $alreadyPending = $changeRequestGuard->findPending(
+                (string) $data['bookId'],
+                (string) $data['sales_order_id'],
+                $requestTypeInt
+            );
+
+            if ($alreadyPending !== null) {
+                $logService->log(
+                    techId: $techId,
+                    action: 'submit_change_request',
+                    status: 'duplicate_suppressed',
+                    bookId: $bookId,
+                    salesOrderId: $data['sales_order_id'],
+                    message: 'Identical change request already sent and unconfirmed — not sent again',
+                    requestPayload: $requestPayloadForLog,
+                    userId: auth()->id(),
+                    meta: [
+                        'reason'            => 'already_pending',
+                        'duplicate_of_log'  => $alreadyPending->id,
+                        'change_request_id' => $alreadyPending->meta['change_request_id'] ?? null,
+                    ],
+                );
+
+                return response()->json([
+                    'status'            => true,
+                    'sent_to_dy'        => true,
+                    'dy_confirmed'      => false,
+                    'duplicate'         => true,
+                    'change_request_id' => $alreadyPending->meta['change_request_id'] ?? null,
+                    'message'           => 'An identical request for this appointment was already sent to Dynamics and is awaiting confirmation. It was not sent again.',
+                ], 202);
             }
 
             // ✅ Everything below writes to the DB — only commit if DY365 accepts
@@ -3490,6 +3563,7 @@ class NewDirectIntegrationController extends Controller
             ], 500);
         } finally {
             \App\Services\DY365\DyRequestBudget::clear();
+            $changeRequestGuard->release($changeRequestLockKey);
         }
     }
 
