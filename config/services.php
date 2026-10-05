@@ -68,8 +68,9 @@ return [
     ],
 
     'whatsapp' => [
-        'token' => env('WHATSAPP_ACCESS_TOKEN', 'EAAKSUZAeFUkkBR2MOh83lIJZAh1ArlZBLwkbCluTH8s7NQ3Be4gy3ZBeX0YHP84ylaFsbViu8ZC2cZBhwsDE0t5mq6zMBtmOjPDZCOZCAjFZCd3W9btM2hsBct0O1zKXbzfro0umNZBrh02WjKGt9gnD7ZA0sLdsHDOT0uzICQkpKt2yoLx1HTBxAZBIp105U1ewNgZDZD'),
-        'verify_token' => env('WHATSAPP_VERIFY_TOKEN', '00IZCYL5Ab1vafxxKfc6ihAMxTz4cVQH'),
+        'token' => env('WHATSAPP_ACCESS_TOKEN', ''),
+        'verify_token' => env('WHATSAPP_VERIFY_TOKEN', ''),
+        'app_secret' => env('WHATSAPP_APP_SECRET'),
     ],
 
     'export' => [
@@ -91,8 +92,7 @@ return [
     ],
 
     'telegram' => [
-        // 'bot_token' => env('TELEGRAM_BOT_TOKEN', '8249060747:AAH-y5LtSwzoMWfjLkvMxZO-ptKuxQwCPMc'),
-        // 'chat_id' => env('TELEGRAM_CHAT_ID', '-5021457521'),
+
         'bot_token' => '8249060747:AAH-y5LtSwzoMWfjLkvMxZO-ptKuxQwCPMc',
         'chat_id' => '-5021457521',
     ],

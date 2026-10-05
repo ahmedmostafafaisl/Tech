@@ -173,7 +173,7 @@ class DyService
 
     public function getToken(): ?string
     {
-        $cacheKey = 'dy:oauth:access_token';
+        $cacheKey = $this->ck('oauth:access_token');
 
         $cached = Cache::get($cacheKey);
         if (!empty($cached)) {
@@ -224,7 +224,36 @@ class DyService
         }
     }
 
-    private function sendRequest(string $method, string $endpoint, array $data = [])
+    /**
+     * Cache key scoped to the CURRENT DY environment (see DyCacheKey): the token,
+     * every cached response and every circuit breaker belong to one base URL, so
+     * switching environments can't serve — or poison — another environment's entries.
+     */
+    private function ck(string $suffix): string
+    {
+        return DyCacheKey::make($this->baseUrl, $suffix);
+    }
+
+    /**
+     * Retry decision for Http::retry(). $safeToRetry = false is for operations
+     * where a repeat could duplicate the effect (see DyRetryPolicy).
+     */
+    private function retryWhen(bool $safeToRetry): \Closure
+    {
+        return function ($exception) use ($safeToRetry) {
+            $isConnection = $exception instanceof ConnectionException;
+            $status       = $exception instanceof RequestException ? $exception->response?->status() : null;
+
+            return DyRetryPolicy::shouldRetry(
+                $safeToRetry,
+                $isConnection,
+                $isConnection ? $exception->getMessage() : null,
+                $status
+            );
+        };
+    }
+
+    private function sendRequest(string $method, string $endpoint, array $data = [], bool $safeToRetry = true)
     {
         $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'];
 
@@ -236,7 +265,7 @@ class DyService
                 throw new \RuntimeException("Missing access token");
             }
 
-            $doRequest = function (string $token) use ($method, $endpoint, $payload) {
+            $doRequest = function (string $token) use ($method, $endpoint, $payload, $safeToRetry) {
                 [$timeoutSec, $attempts] = DyRequestBudget::plan(60, 2);
 
                 return Http::withToken($token)
@@ -244,21 +273,14 @@ class DyService
                     ->asJson()
                     ->connectTimeout(min(5, $timeoutSec))
                     ->timeout($timeoutSec)
-                    ->retry($attempts, 1000, function ($exception) {
-                        if ($exception instanceof ConnectionException) return true;
-                        if ($exception instanceof RequestException) {
-                            $status = $exception->response?->status();
-                            return in_array($status, [429, 500, 502, 503, 504], true);
-                        }
-                        return false;
-                    })
+                    ->retry($attempts, 1000, $this->retryWhen($safeToRetry))
                     ->$method($this->baseUrl . $endpoint, $payload);
             };
 
             $response = $doRequest($token);
 
             if ($response->status() === 401) {
-                Cache::forget('dy:oauth:access_token');
+                Cache::forget($this->ck('oauth:access_token'));
                 $token = $this->getToken();
                 if (!$token) {
                     throw new \RuntimeException("Token refresh failed after 401");
@@ -485,19 +507,19 @@ class DyService
     // create transfer order // done
     public function createTransferOrder(array $payload = [])
     {
-        return $this->requestDynamics2('post', $this->createTransferOrder, $payload);
+        return $this->requestDynamics2('post', $this->createTransferOrder, $payload, safeToRetry: false);
     }
 
     // update transfer order // done
     public function updateTransferOrder(array $payload = [])
     {
-        return $this->sendRequest('post', $this->updateTransferOrder, $payload);
+        return $this->sendRequest('post', $this->updateTransferOrder, $payload, safeToRetry: false);
     }
 
     // delete transfer order // done
     public function deleteTransferOrder(array $payload = [])
     {
-        return $this->sendRequest('post', $this->deleteTransferOrder, $payload);
+        return $this->sendRequest('post', $this->deleteTransferOrder, $payload, safeToRetry: false);
     }
     // get appointments // done
     public function getAppointments(array $payload = [])
@@ -521,7 +543,7 @@ class DyService
     // change appointment status
     public function changeAppointmentStatus(array $payload = [])
     {
-        return $this->sendRequest('post', $this->changeAppointmentStatus, $payload);
+        return $this->sendRequest('post', $this->changeAppointmentStatus, $payload, safeToRetry: false);
     }
     // get technician change status requests
     public function getTechnicianChangeStatusRequests(array $payload = [])
@@ -531,7 +553,7 @@ class DyService
     //add sales line to appointment
     public function addSalesLine(array $payload = [])
     {
-        return $this->requestDynamics2('post', $this->addSalesLine, $payload);
+        return $this->requestDynamics2('post', $this->addSalesLine, $payload, safeToRetry: false);
     }
     // update sales line for appointment
     public function updateSalesLine(array $payload = [])
@@ -546,7 +568,7 @@ class DyService
     // delete sales line for appointment
     public function deleteSalesLine(array $payload = [])
     {
-        return $this->sendRequest('post', $this->deleteSalesLine, $payload);
+        return $this->sendRequest('post', $this->deleteSalesLine, $payload, safeToRetry: false);
     }
     // get payment links
     public function getPaymentLinks(array $data)
@@ -621,12 +643,12 @@ class DyService
     // complete success payments
     public function completeSuccessPayments(array $payload = [])
     {
-        return $this->sendRequest('post', $this->successPayments, $payload);
+        return $this->sendRequest('post', $this->successPayments, $payload, safeToRetry: false);
     }
     // complete success payments v2
     public function completeSuccessPaymentsV2(array $payload = [])
     {
-        return $this->sendRequest('post', $this->successPaymentsV2, $payload);
+        return $this->sendRequest('post', $this->successPaymentsV2, $payload, safeToRetry: false);
     }
 
     // complete appointment with attachments
@@ -635,7 +657,8 @@ class DyService
         return $this->sendRequest(
             'post',
             $this->completeAppointmentAttachments,
-            $payload
+            $payload,
+            safeToRetry: false
         );
     }
     // return dy payment status
@@ -707,7 +730,7 @@ class DyService
             // A 401 is refused before DY processes anything, so refreshing the
             // token and sending once more cannot create a duplicate.
             if ($response->status() === 401) {
-                Cache::forget('dy:oauth:access_token');
+                Cache::forget($this->ck('oauth:access_token'));
                 $token = $this->getToken();
                 $left  = $timeLeft();
 
@@ -788,7 +811,7 @@ class DyService
     public function getTechnicianAppointmentsCached(array $payload, int $ttlSeconds = 60)
     {
         $cacheKey   = $this->buildTechAppointmentsCacheKey($payload);
-        $breakerKey = "dy:breaker:getTechnicianAppointments";
+        $breakerKey = $this->ck('breaker:getTechnicianAppointments');
 
         // Circuit breaker
         $fails = (int) Cache::get($breakerKey, 0);
@@ -812,21 +835,21 @@ class DyService
 
     private function buildTechAppointmentsCacheKey(array $payload): string
     {
-        return sprintf(
-            "dy:techAppointments:%s:%s:%s:%s:%s",
+        return $this->ck(sprintf(
+            "techAppointments:%s:%s:%s:%s:%s",
             $payload['worker'] ?? 'na',
             $payload['fromDate'] ?? 'na',
             $payload['toDate'] ?? 'na',
             $payload['currentPage'] ?? 1,
             $payload['pageSize'] ?? 10
-        );
+        ));
     }
 
 
     //  dynamic function
 
 
-    private function requestDynamics(string $method, string $endpoint, array $data = []): ?array
+    private function requestDynamics(string $method, string $endpoint, array $data = [], bool $safeToRetry = true): ?array
     {
         $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'];
         $payload = empty($data) ? new \stdClass() : $data;
@@ -837,7 +860,7 @@ class DyService
                 throw new \RuntimeException("Missing access token");
             }
 
-            $send = function (string $token) use ($method, $endpoint, $payload) {
+            $send = function (string $token) use ($method, $endpoint, $payload, $safeToRetry) {
                 [$timeoutSec, $attempts] = DyRequestBudget::plan(60, 2);
 
                 return Http::withToken($token)
@@ -845,16 +868,7 @@ class DyService
                     ->asJson()
                     ->connectTimeout(min(5, $timeoutSec))
                     ->timeout($timeoutSec)
-                    ->retry($attempts, 1000, function ($exception) {
-                        if ($exception instanceof ConnectionException) return true;
-
-                        if ($exception instanceof RequestException) {
-                            $status = $exception->response?->status();
-                            return in_array($status, [429, 500, 502, 503, 504], true);
-                        }
-
-                        return false;
-                    })
+                    ->retry($attempts, 1000, $this->retryWhen($safeToRetry))
                     ->$method($this->baseUrl . $endpoint, $payload);
             };
 
@@ -862,7 +876,7 @@ class DyService
 
             // Refresh token once on 401
             if ($response->status() === 401) {
-                Cache::forget('dy:oauth:access_token');
+                Cache::forget($this->ck('oauth:access_token'));
                 $token = $this->getToken();
                 if (!$token) {
                     throw new \RuntimeException("Token refresh failed after 401");
@@ -880,7 +894,7 @@ class DyService
         }
     }
 
-    private function requestDynamics2(string $method, string $endpoint, array $data = []): array
+    private function requestDynamics2(string $method, string $endpoint, array $data = [], bool $safeToRetry = true): array
     {
         $functionName = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? __FUNCTION__;
         $payload      = empty($data) ? new \stdClass() : $data;
@@ -892,7 +906,7 @@ class DyService
                 throw new \RuntimeException('Missing access token');
             }
 
-            $send = function (string $token) use ($method, $endpoint, $payload): Response {
+            $send = function (string $token) use ($method, $endpoint, $payload, $safeToRetry): Response {
                 [$timeoutSec, $attempts] = DyRequestBudget::plan(60, 2);
 
                 return Http::withToken($token)
@@ -903,18 +917,7 @@ class DyService
                     ->retry(
                         $attempts,
                         1000,
-                        function ($exception) {
-                            if ($exception instanceof ConnectionException) {
-                                return true;
-                            }
-
-                            if ($exception instanceof RequestException) {
-                                $status = $exception->response?->status();
-                                return in_array($status, [429, 500, 502, 503, 504], true);
-                            }
-
-                            return false;
-                        },
+                        $this->retryWhen($safeToRetry),
                         throw: false
                     )
                     ->$method($this->baseUrl . $endpoint, $payload);
@@ -924,7 +927,7 @@ class DyService
 
             // Token expired — refresh once and retry
             if ($response->status() === 401) {
-                Cache::forget('dy:oauth:access_token');
+                Cache::forget($this->ck('oauth:access_token'));
                 $token = $this->getToken();
 
                 if (!$token) {
@@ -1014,7 +1017,7 @@ class DyService
     public function getTechnicianAppointmentsNew(array $payload = [])
     {
         $cacheKey = $this->cacheKey('getTechnicianAppointments', $payload);
-        $breakerKey = 'dy:breaker:getTechnicianAppointments';
+        $breakerKey = $this->ck('breaker:getTechnicianAppointments');
 
         return $this->callCached($cacheKey, $breakerKey, 0, function () use ($payload) {
             return $this->requestDynamics2('post', $this->getTechnicianAppointments, $payload);
@@ -1024,15 +1027,15 @@ class DyService
     private function cacheKey(string $name, array $payload): string
     {
         // key قصير وثابت
-        return 'dy:' . $name . ':' . md5(json_encode($payload));
+        return $this->ck($name . ':' . md5(json_encode($payload)));
     }
     // new single appointment by book id with caching and circuit breaker
     public function getAppointmentByBookIdNew(string $bookId, int $ttlSeconds = 60): ?array
     {
         $payload = ['bookId' => $bookId];
 
-        $cacheKey   = "dy:getAppointmentByBookId:" . md5($bookId);
-        $breakerKey = "dy:breaker:getAppointmentByBookId";
+        $cacheKey   = $this->ck('getAppointmentByBookId:' . md5($bookId));
+        $breakerKey = $this->ck('breaker:getAppointmentByBookId');
 
         return $this->callCached($cacheKey, $breakerKey, $ttlSeconds, function () use ($payload) {
             return $this->requestDynamics('post', $this->getAppointmentByBookId, $payload);
@@ -1083,7 +1086,7 @@ class DyService
 
         $freshKey   = $baseKey . ':fresh';
         $staleKey   = $baseKey . ':stale';
-        $breakerKey = 'dy:breaker:getWarehouseStock';
+        $breakerKey = $this->ck('breaker:getWarehouseStock');
 
         return $this->callCachedWithStale(
             $freshKey,
@@ -1101,7 +1104,7 @@ class DyService
 
         $freshKey   = $baseKey . ':fresh';
         $staleKey   = $baseKey . ':stale';
-        $breakerKey = 'dy:breaker:getTechnicianDistributions';
+        $breakerKey = $this->ck('breaker:getTechnicianDistributions');
 
         return $this->callCachedWithStale(
             $freshKey,
@@ -1119,7 +1122,7 @@ class DyService
 
         $freshKey   = $baseKey . ':fresh';
         $staleKey   = $baseKey . ':stale';
-        $breakerKey = 'dy:breaker:updateCallListScore';
+        $breakerKey = $this->ck('breaker:updateCallListScore');
 
         return $this->callCachedWithStale(
             $freshKey,

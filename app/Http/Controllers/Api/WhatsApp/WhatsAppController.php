@@ -727,7 +727,9 @@ class WhatsAppController extends Controller
             $token     = $request->query('hub_verify_token');
             $challenge = $request->query('hub_challenge');
 
-            if ($mode === 'subscribe' && $token === config('services.whatsapp.verify_token')) {
+            $expectedToken = (string) config('services.whatsapp.verify_token');
+
+            if ($mode === 'subscribe' && $expectedToken !== '' && hash_equals($expectedToken, (string) $token)) {
                 return response($challenge, 200);
             }
 
@@ -735,6 +737,30 @@ class WhatsAppController extends Controller
         }
 
         // ── POST: inbound message ────────────────────────────────────────
+        // Verify Meta's signature before touching anything. Without it anyone could POST a
+        // fake button reply and create a cancel / reschedule change request in Dynamics.
+        // Enforced only once WHATSAPP_APP_SECRET is set, so deploying this can't break the
+        // webhook before the secret is configured.
+        $appSecret = (string) config('services.whatsapp.app_secret');
+
+        if ($appSecret === '') {
+            try {
+                if (\Illuminate\Support\Facades\Cache::add('whatsapp:signature-warning', 1, 300)) {
+                    Log::channel('whatsapp')->warning('Webhook signature NOT verified — WHATSAPP_APP_SECRET is not set');
+                }
+            } catch (\Throwable $e) {
+                // never let a cache problem break the webhook
+            }
+        } elseif (! \App\Services\WhatsApp\MetaWebhookSignature::isValid(
+            $request->getContent(),
+            $request->header('X-Hub-Signature-256'),
+            $appSecret
+        )) {
+            Log::channel('whatsapp')->warning('Webhook rejected — invalid or missing signature', ['ip' => $request->ip()]);
+
+            return response()->json(['status' => 'forbidden'], 403);
+        }
+
         $entry = $request->input('entry.0.changes.0.value');
 
         // Delivery status update (sent/delivered/read/failed). This was
@@ -810,53 +836,59 @@ class WhatsAppController extends Controller
 
         $appointment->update(['customer_response' => $customerResponse]);
 
-        $requestBody = [
-            '_contract' => [
-                'bookId'       => $appointment->book_id,
-                'salesOrderId' => $appointment->sales_order,
-                'actionOwner'  => 2,
-                'requestType'  => match ($customerResponse) {
-                    'confirm'    => 2,
-                    'cancel'     => 0,
-                    'reschedule' => 1,
-                },
-            ],
-        ];
-
-
-
-        try {
-            $response = $this->dyService->sendRequest3(
-                'post',
-                $this->dyService->customerChangeRequest,
-                $requestBody
-            );
-
-            if (! $response || ($response['ok'] ?? false) === false) {
-                Log::channel('whatsapp')->error('❌ Dy365 rejected request', [
-                    'appointment_id' => $appointmentId,
-                    'response'       => $response,
-                ]);
-                $appointment->update(['flag' => 0, 'dy_response' => $response]);
-            } else {
-                Log::channel('whatsapp')->info('✅ Dy365 request success', [
-                    'appointment_id' => $appointmentId,
-                    'response'       => $response,
-                ]);
-                $appointment->update(['flag' => 1, 'dy_response' => $response]);
-            }
-        } catch (\Throwable $e) {
-            Log::channel('whatsapp')->error('❌ Dy365 Exception', [
+        // Meta re-delivers any webhook it doesn't get a quick 200 for, and a customer can
+        // double-tap; either used to send the same change request to DY again. A message
+        // (same WhatsApp message id) is acted on once.
+        if (! $this->claimInboundMessage($message['id'] ?? null)) {
+            Log::channel('whatsapp')->info('↩️ Duplicate webhook delivery ignored', [
                 'appointment_id' => $appointmentId,
-                'error'          => $e->getMessage(),
+                'message_id'     => $message['id'] ?? null,
             ]);
-            $appointment->update([
-                'flag'        => 0,
-                'dy_response' => ['exception' => $e->getMessage()],
-            ]);
+
+            return response()->json(['status' => 'ok']);
         }
 
+        // Answer Meta now. The DY call used to run right here (500s timeout, 3 retries), so
+        // while DY was slow each customer reply held a worker for minutes and Meta kept
+        // re-sending. It now runs in the background (like payments:complete) and records
+        // flag / dy_response on the message when it finishes.
+        $this->launchAppointmentResponseSend($appointment->id);
+
         return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * True the first time a WhatsApp message id is seen, false for a re-delivery.
+     * Fails open: if the cache is unavailable we would rather risk a duplicate than
+     * drop a customer's reply.
+     */
+    private function claimInboundMessage(?string $messageId): bool
+    {
+        if (! $messageId) {
+            return true;
+        }
+
+        try {
+            return \Illuminate\Support\Facades\Cache::add('whatsapp:inbound:' . $messageId, 1, now()->addDays(3));
+        } catch (\Throwable $e) {
+            return true;
+        }
+    }
+
+    /** Runs whatsapp:send-appointment-response in the background (same pattern as payments:complete). */
+    private function launchAppointmentResponseSend(int $preAppointmentMessageId): void
+    {
+        $bgLogFile = storage_path('logs/whatsapp_dy_bg.log');
+
+        $cmd = 'php ' . escapeshellarg(base_path('artisan')) . ' whatsapp:send-appointment-response '
+            . escapeshellarg((string) $preAppointmentMessageId)
+            . ' >> ' . escapeshellarg($bgLogFile) . ' 2>&1 &';
+
+        Log::channel('whatsapp')->info('🚀 Launching background DY send for customer response', [
+            'pre_appointment_message_id' => $preAppointmentMessageId,
+        ]);
+
+        exec($cmd);
     }
 
     // ────────────────────────────────────────────────────────────────────

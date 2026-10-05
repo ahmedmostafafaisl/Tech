@@ -43,6 +43,7 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\ResendFailedWhatsAppMessages::class,
         \App\Console\Commands\RefreshInvoiceShortLink::class,
         \App\Console\Commands\DyEnvironmentSwitch::class,
+        \App\Console\Commands\SendAppointmentResponseToDyCommand::class,
         \App\Console\Commands\SyncCustomers::class,
         \App\Console\Commands\SyncCategories::class,
         // \App\Console\Commands\SyncTechnicianStock::class,
