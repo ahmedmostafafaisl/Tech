@@ -17,6 +17,9 @@ final class TamaraWebhookRegistrationService
     private const PATH = '/webhooks';
 
     /** Keys removed from anything Tamara returns before it is stored or shown. */
+    /** Longest Tamara reply body written to the log / stored (characters). */
+    private const MAX_LOGGED_BODY = 10000;
+
     private const SENSITIVE_KEYS = ['headers', 'authorization', 'secret', 'token', 'api_key', 'apikey'];
 
     // ------------------------------------------------------------------ what we are about to do
@@ -128,7 +131,8 @@ final class TamaraWebhookRegistrationService
                     // We cannot tell whether it still exists, so creating another could duplicate it: refuse.
                     throw TamaraWebhookException::api(
                         "A webhook ({$record->webhook_id}) is already recorded but Tamara could not confirm it: {$e->getMessage()} Nothing was created, to avoid a duplicate.",
-                        $e->httpStatus
+                        $e->httpStatus,
+                        $e->detail
                     );
                 }
 
@@ -257,7 +261,13 @@ final class TamaraWebhookRegistrationService
         try {
             $response = $this->send('POST', self::PATH, $this->body($type, $target['events'], $target['url'], $secret), $record);
         } catch (\Throwable $e) {
-            $record->update(['status' => TamaraWebhook::STATUS_FAILED]);
+            $record->update([
+                'status'         => TamaraWebhook::STATUS_FAILED,
+                'remote_payload' => ['error' => [
+                    'http_status' => $e instanceof TamaraWebhookException ? $e->httpStatus : null,
+                    'detail'      => $e instanceof TamaraWebhookException ? ($e->detail ?? $e->getMessage()) : $e->getMessage(),
+                ]],
+            ]);
 
             throw $e;
         }
@@ -418,19 +428,53 @@ final class TamaraWebhookRegistrationService
         try {
             $response = $this->http()->send($method, $path, $body === null ? [] : ['json' => $body]);
         } catch (ConnectionException $e) {
-            throw TamaraWebhookException::api('Could not reach Tamara: ' . $this->redact($e->getMessage(), $secret));
+            $detail = $this->redact($e->getMessage(), $secret);
+
+            Log::error('Tamara webhook API call could not reach Tamara', [
+                'request'    => $this->describeRequest($method, $path, $body),
+                'exception'  => get_class($e),
+                'error'      => $detail,
+                'webhook_id' => $record?->webhook_id,
+            ]);
+
+            throw TamaraWebhookException::api('Could not reach Tamara: ' . $detail, null, $detail);
         }
 
         if ($response->failed()) {
-            $detail = $response->json('message');
-            $detail = is_string($detail) ? ': ' . $this->redact(mb_substr($detail, 0, 200), $secret) : '';
+            // The COMPLETE reply, not just its "message": Tamara explains what it rejected in the body.
+            $detail = mb_substr($this->redact((string) $response->body(), $secret), 0, self::MAX_LOGGED_BODY);
+            $reason = $response->json('message');
+            $reason = is_string($reason) ? ': ' . $this->redact(mb_substr($reason, 0, 500), $secret) : '';
 
-            Log::warning('Tamara webhook API call failed', ['method' => $method, 'path' => $path, 'status' => $response->status()]);
+            Log::error('Tamara webhook API call failed', [
+                'request'       => $this->describeRequest($method, $path, $body),
+                'status'        => $response->status(),
+                'reason'        => $response->reason(),
+                'response_body' => $detail,
+                'webhook_id'    => $record?->webhook_id,
+                'record_id'     => $record?->id,
+            ]);
 
-            throw TamaraWebhookException::api("Tamara answered HTTP {$response->status()}{$detail}.", $response->status());
+            throw TamaraWebhookException::api("Tamara answered HTTP {$response->status()}{$reason}.", $response->status(), $detail);
         }
 
         return $response;
+    }
+
+    /** What was sent to Tamara, for the log: the real URL and body, with every header VALUE (the secret) masked. */
+    private function describeRequest(string $method, string $path, ?array $body): array
+    {
+        $summary = ['method' => $method, 'url' => rtrim((string) config('services.tamara.api_url'), '/') . $path];
+
+        if ($body !== null) {
+            if (isset($body['headers']) && is_array($body['headers'])) {
+                $body['headers'] = array_map(fn() => '[redacted]', $body['headers']);
+            }
+
+            $summary['body'] = $body;
+        }
+
+        return $summary;
     }
 
     /** Removes the API key and the secret (and any header-like field) from text or data that might be shown or stored. */

@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\Payment\TamaraWebhookController;
 use App\Http\Controllers\Api\Payment\TamaraWebhookManagementController;
 use App\Http\Controllers\Api\Pdf\Invoice2Controller;
 use App\Http\Controllers\Api\Service\ServiceController;
+use App\Http\Controllers\Api\Settings\DefaultOtpAllowlistController;
 use App\Http\Controllers\Api\Settings\InvoiceSettingController;
 use App\Http\Controllers\Api\Settings\SettingController;
 use App\Http\Controllers\Api\System\SystemHealthController;
@@ -885,6 +886,10 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware('auth:sanctum')->prefix('settings')->group(function () {
     Route::get('/appointment-cooldown', [SettingController::class, 'index']);
     Route::put('/appointment-cooldown', [SettingController::class, 'updateCooldown']);
+    Route::middleware('role:super_admin')->post('/otp-default/phones', [DefaultOtpAllowlistController::class, 'store']);
+    // Tech
+    Route::get('/transfer-orders/technician-to-technician/status', [SettingController::class, 'technicianToTechnicianStatus']);
+    Route::put('/transfer-orders/technician-to-technician/status', [SettingController::class, 'updateTechnicianToTechnicianStatus']);
     // Tech
     Route::get('/transfer-orders/technician-to-technician/status', [SettingController::class, 'technicianToTechnicianStatus']);
     Route::put('/transfer-orders/technician-to-technician/status', [SettingController::class, 'updateTechnicianToTechnicianStatus']);

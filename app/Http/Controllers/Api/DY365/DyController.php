@@ -145,76 +145,59 @@ class DyController extends Controller
      */
     public function success(Request $request, $reference_id)
     {
-        $method  = (string) $request->payment_method;
-        $payment = DyPaymentLink::where('payment_method', $method)->where('dy_reference_id', $reference_id)->first();
-
+        $payment = DyPaymentLink::where('payment_method', $request->payment_method)->where('dy_reference_id', $request->reference_id)->first();
         if (!$payment) {
             return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
         }
 
-        if (!in_array($method, self::DY_REDIRECT_METHODS, true)) {
-            // ClickPay links are completed by ClickPay's own verified return/callback, never by this URL.
-            return response()->json(['status' => 'error', 'message' => 'This payment method is not completed through this endpoint.'], 422);
-        }
+        // start  payment status
+        $this->handlePaymentStatus($payment, "Approved");
+        // end  payment status
 
-        // A replay of a link that is already complete: nothing to verify and nothing to tell DY365 again.
-        if ($payment->status === 'success') {
-            return $this->dyLinkResultView($payment, 'success');
-        }
-
-        if (!in_array($payment->status, self::DY_OPEN_STATES, true)) {
-            return response()->json(['status' => 'error', 'message' => 'This payment can no longer be completed.'], 409);
-        }
-
-        try {
-            $verified = $method === 'tabby'
-                ? $this->verifyDyTabbyLink($payment, $request)
-                : $this->verifyDyTamaraLink($payment, $request);
-        } catch (\Throwable $e) {
-            Log::error('DY payment link success: provider verification failed; link left unchanged', [
-                'dy_reference_id' => $payment->dy_reference_id,
-                'method'          => $method,
-                'error'           => $e->getMessage(),
+        if ($request->payment_method == 'tabby') {
+            $payment->update([
+                'status' => 'success',
+                'payment_id' => $request->payment_id ?? null,
             ]);
+        } else if ($request->payment_method == 'tamara') {
+            $orderId = $request->orderId;
+            $statusResponse = app(TamaraService::class)->getOrderStatus($orderId);
+            if (isset($statusResponse['status'])) {
+                if ($statusResponse['status'] === 'approved') {
+                    $authResponse = app(TamaraService::class)->authorizeOrder($orderId);
+                    // $captureResponse = app(TamaraService::class)->captureOrderNew($referenceId, $orderId);
+                    if (isset($authResponse['status']) && $authResponse['status'] === 'authorised') {
+                        $captureResponse = app(TamaraService::class)->captureOrderDy($reference_id, $orderId);
+                    }
+                } elseif ($statusResponse['status'] === 'authorised') {
+                    $captureResponse = app(TamaraService::class)->captureOrderDy($reference_id, $orderId);
+                }
 
-            return response()->json(['status' => 'error', 'message' => 'The payment could not be verified with the provider. Please try again.'], 502);
-        }
+                // Mark success regardless of status flow
 
-        if ($verified['outcome'] === 'error') {
-            return response()->json(['status' => 'error', 'message' => 'The payment could not be verified with the provider. Please try again.'], 502);
-        }
-
-        if ($verified['outcome'] === 'mismatch') {
-            Log::warning('DY payment link success: provider payment does not match the link', [
-                'dy_reference_id' => $payment->dy_reference_id,
-                'method'          => $method,
-                'reason'          => $verified['reason'] ?? null,
+            }
+            $payment->update([
+                'status' => 'success',
+                'payment_id' => $request->orderId ?? null,
             ]);
-
-            return response()->json(['status' => 'error', 'message' => 'The provider payment does not match this payment link.'], 422);
-        }
-
-        if ($verified['outcome'] !== 'approved') {
-            // pending / rejected at the provider: nothing is confirmed, so nothing is changed
-            return $this->dyLinkResultView($payment, 'failed');
-        }
-
-        try {
-            $result = $this->completeDyLink($payment, ['status' => 'success', 'payment_id' => $verified['payment_id']], 'Approved');
-        } catch (\Throwable $e) {
-            Log::error('DY payment link success: DY365 did not accept the notification; link left unchanged', [
-                'dy_reference_id' => $payment->dy_reference_id,
-                'error'           => $e->getMessage(),
+        } else if ($request->payment_method == 'clickpay') {
+            $payment->update([
+                'status' => 'success',
             ]);
-
-            return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
         }
 
-        if ($result === 'invalid_state') {
-            return response()->json(['status' => 'error', 'message' => 'This payment can no longer be completed.'], 409);
-        }
+        $totalAmount = $payment->amount; // this includes 15% VAT
 
-        return $this->dyLinkResultView($payment->fresh(), 'success');
+        $priceWithoutTax = round($totalAmount / 1.15, 2); // base price
+        $taxAmount = round($totalAmount - $priceWithoutTax, 2); // 15% VAT
+
+        return view('Payment.result', [
+            'status' => 'success',
+            'payment_type' => $request->payment_method,
+            'payment' => $payment,
+            'priceWithoutTax' => $priceWithoutTax,
+            'taxAmount' => $taxAmount,
+        ]);
     }
 
     public function cancel(Request $request, $reference_id)

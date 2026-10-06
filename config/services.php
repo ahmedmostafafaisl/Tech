@@ -65,12 +65,13 @@ return [
         // The webhook this application registers with Tamara (php artisan tamara:webhook:register).
         'webhook' => [
             'type'   => 'order',
-            // Event names to subscribe to, as in the agreed registration payload. Override with a comma-separated
-            // TAMARA_WEBHOOK_EVENTS if Tamara's documentation says otherwise. Processing is event-agnostic: the
+            // Event names to subscribe to. Tamara validates them and answers HTTP 400 "Invalid registered event X" for a
+            // name it does not accept (it rejected order_updated). Override with a comma-separated
+            // TAMARA_WEBHOOK_EVENTS; the full Tamara error is logged and printed by tamara:webhook:register. Processing is event-agnostic: the
             // name is only logged, Tamara's order status decides.
             'events' => array_values(array_filter(array_map('trim', explode(',', (string) env(
                 'TAMARA_WEBHOOK_EVENTS',
-                'order_approved,order_authorised,order_canceled,order_updated,order_captured,order_refunded'
+                'order_approved,order_authorised,order_canceled,order_captured,order_refunded'
             ))))),
             // Hosts the webhook URL may be updated to through the API. Default (empty): only the host of APP_URL.
             'allowed_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('TAMARA_WEBHOOK_ALLOWED_HOSTS', ''))))),
@@ -114,8 +115,8 @@ return [
 
     'telegram' => [
 
-        'bot_token' => '8249060747:AAH-y5LtSwzoMWfjLkvMxZO-ptKuxQwCPMc',
-        'chat_id' => '-5021457521',
+        'bot_token' => '8506550704:AAHYtIX343DpYpAUvCJEPaszC0mjusu0BuI',
+        'chat_id' => '-1004380688068',
     ],
 
 ];

@@ -50,6 +50,7 @@ class TamaraWebhookDeleteCommand extends Command
             $service->delete();
         } catch (TamaraWebhookException $e) {
             $this->error($e->getMessage());
+            $this->reportDetail($e);
             $this->line('The local record was NOT changed.');
 
             return self::FAILURE;
@@ -58,5 +59,22 @@ class TamaraWebhookDeleteCommand extends Command
         $this->info('Tamara webhook deleted. The local record was kept and marked inactive.');
 
         return self::SUCCESS;
+    }
+
+    /** Tamara's complete reply (credentials already removed), so the reason for a rejection is visible. */
+    private function reportDetail(TamaraWebhookException $e): void
+    {
+        if ($e->detail === null || $e->detail === '') {
+            return;
+        }
+
+        $decoded = json_decode($e->detail, true);
+        $text    = is_array($decoded) ? json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : $e->detail;
+
+        $this->newLine();
+        $this->line('Tamara response:');
+        $this->line((string) $text);
+        $this->newLine();
+        $this->line('The full error was also written to the application log (storage/logs).');
     }
 }

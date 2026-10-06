@@ -17,6 +17,8 @@ final class TamaraWebhookException extends \RuntimeException
         string $message,
         public readonly string $kind,
         public readonly ?int $httpStatus = null,
+        /** Tamara's complete reply (or the connection error), with credentials removed. Safe to log and print. */
+        public readonly ?string $detail = null,
     ) {
         parent::__construct($message);
     }
@@ -36,9 +38,9 @@ final class TamaraWebhookException extends \RuntimeException
         return new self($message, self::INVALID_INPUT);
     }
 
-    public static function api(string $message, ?int $httpStatus = null): self
+    public static function api(string $message, ?int $httpStatus = null, ?string $detail = null): self
     {
-        return new self($message, self::API, $httpStatus);
+        return new self($message, self::API, $httpStatus, $detail);
     }
 
     public function isNotFoundAtTamara(): bool
