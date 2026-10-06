@@ -27,6 +27,9 @@ class TamaraService
 
         $this->client = new Client([
             'base_uri' => $this->apiUrl,
+            // Bounded: with no timeout a hung Tamara call held a PHP worker until FPM killed it.
+            'timeout' => (float) config('services.tamara.timeout', 20),
+            'connect_timeout' => (float) config('services.tamara.connect_timeout', 5),
             'headers' => [
                 'Authorization' => 'Bearer ' . $this->apiKey,
                 'Content-Type' => 'application/json',

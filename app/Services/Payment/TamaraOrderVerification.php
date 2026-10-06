@@ -31,9 +31,10 @@ final class TamaraOrderVerification
 
     /**
      * @param  array<string, mixed>  $order  decoded Tamara order, or the ['error' => true] shape
+     * @param  string|null  $expectedOrderId  the order id we requested (the LOCALLY stored one, never a browser/webhook value)
      * @return array{verdict: string, reason: string}
      */
-    public static function evaluate(array $order, string $dyReference, float|string|int $amount, string $currency = 'SAR'): array
+    public static function evaluate(array $order, string $dyReference, float|string|int $amount, string $currency = 'SAR', ?string $expectedOrderId = null): array
     {
         if ($order === [] || ! empty($order['error']) || ! isset($order['status'])) {
             return self::result(self::ERROR, 'no usable reply from Tamara');
@@ -43,6 +44,17 @@ final class TamaraOrderVerification
 
         if ($dyReference === '' || $reference === '' || ! hash_equals($dyReference, $reference)) {
             return self::result(self::MISMATCH, 'order reference does not match this payment link');
+        }
+
+        // The order Tamara describes must be the one we asked about. Checked only when Tamara includes an order_id
+        // in the reply (nothing else in this codebase reads that field, so its presence is not assumed).
+        $returnedOrderId = (string) ($order['order_id'] ?? '');
+
+        if (
+            $expectedOrderId !== null && $expectedOrderId !== '' && $returnedOrderId !== ''
+            && ! hash_equals($expectedOrderId, $returnedOrderId)
+        ) {
+            return self::result(self::MISMATCH, 'Tamara returned a different order than the one requested');
         }
 
         $total = $order['total_amount']['amount'] ?? null;

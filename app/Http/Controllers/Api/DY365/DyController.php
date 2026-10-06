@@ -28,8 +28,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use App\Services\Payment\TamaraWebhookSignature;
+use App\Services\Payment\TamaraWebhookProcessor;
 use App\Services\DY365\DyAcknowledgement;
+use App\Services\Payment\DyPaymentLinkTransitions;
+use App\Services\Payment\TamaraDyLinkVerifier;
 use App\Services\Payment\TamaraOrderVerification;
 use App\Services\Payment\TabbyPaymentVerification;
 use Illuminate\Support\Facades\Storage;
@@ -225,128 +227,30 @@ class DyController extends Controller
         return $this->dyLinkNotCompleted($request, $reference_id, 'failed', 'Rejected');
     }
 
+    /**
+     * The per-checkout notification URL older Tamara payment links still carry
+     * (POST /api/tabby/webhook/reference_id={PAY-...}/payment_method=tamara). Same processing as the stable
+     * POST /api/tamara/webhook: the notification is only a trigger, Tamara's API is asked before anything changes.
+     */
     public function tamaraWebhook(Request $request)
     {
-        // Authenticate FIRST. Nothing below (payment state, DY365 notification) runs for a
-        // request that cannot prove it came from Tamara.
-        $notificationToken = (string) config('services.tamara.notification_token');
+        [$status, $body] = app(TamaraWebhookProcessor::class)->handle($request, (string) $request->route('reference_id'));
 
-        if ($notificationToken === '') {
-            Log::error('Tamara webhook rejected: TAMARA_NOTIFICATION_TOKEN is not configured');
-
-            return response()->json(['status' => 'error', 'message' => 'Webhook authentication is not configured.'], 503);
-        }
-
-        if (!TamaraWebhookSignature::authenticate(TamaraWebhookSignature::candidatesFrom($request), $notificationToken)) {
-            Log::warning('Tamara webhook rejected: missing or invalid signature', ['ip' => $request->ip()]);
-
-            return response()->json(['status' => 'error', 'message' => 'Invalid signature.'], 401);
-        }
-
-        // Optional: verify $signature against your webhook secret if configured
-
-        $payload = $request->all();
-
-        // Tamara webhook sends: order_id, order_reference_id, event_type, etc.
-        $orderId          = $payload['order_id']           ?? null;
-        $referenceId      = $payload['order_reference_id'] ?? null;   // e.g. PAY-000002466
-        $eventType        = $payload['event_type']         ?? null;   // order_approved, order_expired, etc.
-
-        if (!$orderId || !$referenceId) {
-            return response()->json(['status' => 'error', 'message' => 'Missing required fields.'], 400);
-        }
-
-        // Find the payment record
-        $payment = DyPaymentLink::where('payment_method', 'tamara')
-            ->where('dy_reference_id', $referenceId)
-            ->first();
-
-        if (!$payment) {
-            return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
-        }
-
-        // Avoid reprocessing already completed payments
-        if ($payment->status === 'success') {
-            return response()->json(['status' => 'ok', 'message' => 'Already processed.'], 200);
-        }
-
-        switch ($eventType) {
-
-            case 'order_approved':
-                // Authorize the order
-                $authResponse = app(TamaraService::class)->authorizeOrder($orderId);
-
-                if (isset($authResponse['status']) && $authResponse['status'] === 'authorised') {
-                    app(TamaraService::class)->captureOrderDy($referenceId, $orderId);
-                }
-
-                $this->handlePaymentStatus($payment, 'Approved');
-
-                $payment->update([
-                    'status'     => 'success',
-                    'payment_id' => $orderId,
-                ]);
-                break;
-
-            case 'order_authorised':
-                // Order was already authorised, just capture
-                app(TamaraService::class)->captureOrderDy($referenceId, $orderId);
-
-                $this->handlePaymentStatus($payment, 'Approved');
-
-                $payment->update([
-                    'status'     => 'success',
-                    'payment_id' => $orderId,
-                ]);
-                break;
-
-            case 'order_captured':
-                // Capture confirmed by Tamara — ensure our record is marked success
-                if ($payment->status !== 'success') {
-                    $this->handlePaymentStatus($payment, 'Approved');
-                    $payment->update([
-                        'status'     => 'success',
-                        'payment_id' => $orderId,
-                    ]);
-                }
-                break;
-
-            case 'order_expired':
-            case 'order_declined':
-            case 'order_cancelled':
-                $this->handlePaymentStatus($payment, 'Declined');
-                $payment->update(['status' => 'failed']);
-                break;
-
-            default:
-                // Unknown event — log it but return 200 so Tamara stops retrying
-                Log::warning('Tamara webhook unknown event', ['event' => $eventType, 'payload' => $payload]);
-                break;
-        }
-
-        return response()->json(['status' => 'ok'], 200);
+        return response()->json($body, $status);
     }
 
     // handle payment status
     public function handlePaymentStatus($payment, $status)
     {
-        $payload = [
-            "_contract" => [
-                "PaymentLinkId" => $payment->payment_reference_id,
-                "PaymentStatus" => $status,
-                "ReferenceId" => $payment->dy_reference_id,
-            ],
-        ];
-
-        // The reply used to be thrown away; callers that care can now check DyAcknowledgement::accepted().
-        return $this->dy_service->dyPaymentStatus($payload);
+        // The reply used to be thrown away; callers that care can check DyAcknowledgement::accepted().
+        return app(DyPaymentLinkTransitions::class)->notify($payment, $status);
     }
 
     /** Payment methods the tabby/tamara redirect URLs may complete. ClickPay has its own verified return URL. */
     private const DY_REDIRECT_METHODS = ['tabby', 'tamara'];
 
     /** A link in one of these states can still become success / cancelled / failed. */
-    private const DY_OPEN_STATES = ['created', 'pending', 'failed', 'cancelled'];
+    private const DY_OPEN_STATES = DyPaymentLinkTransitions::OPEN_STATES;
 
     /**
      * Cancel / failure redirects. A redirect can never undo a payment: a paid link is refused, the provider is
@@ -416,35 +320,10 @@ class DyController extends Controller
         return $this->dyLinkResultView($payment->fresh(), $newStatus);
     }
 
-    /**
-     * Moves an open link to its new status and tells DY365 — once. The row is locked, so a repeated or concurrent
-     * request cannot notify twice. If DY365 does not accept the notification nothing is changed (the transaction
-     * rolls back) and the same URL can simply be called again.
-     *
-     * @return string 'done' | 'already' | 'invalid_state'
-     * @throws \RuntimeException when DY365 did not accept the notification
-     */
+    /** @return string 'done' | 'already' | 'invalid_state'  (throws when DY365 does not accept the notification) */
     private function completeDyLink(DyPaymentLink $payment, array $update, string $dyStatus): string
     {
-        return DB::transaction(function () use ($payment, $update, $dyStatus) {
-            $locked = DyPaymentLink::whereKey($payment->id)->lockForUpdate()->first();
-
-            if ($locked->status === $update['status']) {
-                return 'already';
-            }
-
-            if (!in_array($locked->status, self::DY_OPEN_STATES, true)) {
-                return 'invalid_state';
-            }
-
-            if (!DyAcknowledgement::accepted($this->handlePaymentStatus($locked, $dyStatus))) {
-                throw new \RuntimeException("DY365 did not accept the {$dyStatus} notification");
-            }
-
-            $locked->update($update);
-
-            return 'done';
-        });
+        return app(DyPaymentLinkTransitions::class)->complete($payment, $update, $dyStatus);
     }
 
     /** @return array{outcome: string, payment_id?: string, reason?: string} */
@@ -480,65 +359,11 @@ class DyController extends Controller
     }
 
     /** @return array{outcome: string, payment_id?: string, reason?: string} */
+    /** @return array{outcome: string, payment_id?: string, reason?: string} */
     private function verifyDyTamaraLink(DyPaymentLink $payment, Request $request): array
     {
-        // The Tamara order id was stored when the link was created; the browser's copy is only compared with it.
-        $stored = (string) $payment->payment_reference_id;
-        $given  = trim((string) $request->orderId);
-
-        if ($stored !== '' && $given !== '' && !hash_equals($stored, $given)) {
-            return ['outcome' => 'mismatch', 'reason' => 'orderId differs from the one created for this link'];
-        }
-
-        $orderId = $stored !== '' ? $stored : $given;
-
-        if ($orderId === '') {
-            return ['outcome' => 'mismatch', 'reason' => 'no order id'];
-        }
-
-        $tamara = app(TamaraService::class);
-        $read   = fn() => TamaraOrderVerification::evaluate($tamara->getOrderStatus($orderId), (string) $payment->dy_reference_id, $payment->amount);
-        $check  = $read();
-
-        switch ($check['verdict']) {
-            case TamaraOrderVerification::ERROR:
-                return ['outcome' => 'error', 'reason' => $check['reason']];
-            case TamaraOrderVerification::MISMATCH:
-                return ['outcome' => 'mismatch', 'reason' => $check['reason']];
-            case TamaraOrderVerification::REJECTED:
-                return ['outcome' => 'rejected'];
-            case TamaraOrderVerification::PENDING:
-                return ['outcome' => 'pending'];
-        }
-
-        if ($check['verdict'] === TamaraOrderVerification::NEEDS_AUTHORISE) {
-            $auth       = $tamara->authorizeOrder($orderId);
-            $authorised = is_array($auth) && empty($auth['error']) && in_array(strtolower((string) ($auth['status'] ?? '')), ['authorised', 'authorized'], true);
-
-            if (!$authorised) {
-                // e.g. the webhook authorised it a moment ago: trust Tamara's current word, not the failed call
-                $after = $read()['verdict'];
-
-                if (!in_array($after, [TamaraOrderVerification::AUTHORISED, TamaraOrderVerification::CAPTURED], true)) {
-                    return ['outcome' => 'error', 'reason' => 'Tamara did not authorise the order'];
-                }
-
-                $check['verdict'] = $after;
-            } else {
-                $check['verdict'] = TamaraOrderVerification::AUTHORISED;
-            }
-        }
-
-        if ($check['verdict'] === TamaraOrderVerification::AUTHORISED) {
-            // Best effort, exactly as before: its result has never gated the link, and it is not made to now.
-            $capture = $tamara->captureOrderDy((string) $payment->dy_reference_id, $orderId);
-
-            if (is_array($capture) && !empty($capture['error'])) {
-                Log::warning('DY Tamara capture reported an error', ['dy_reference_id' => $payment->dy_reference_id, 'error' => $capture['message'] ?? null]);
-            }
-        }
-
-        return ['outcome' => 'approved', 'payment_id' => $orderId];
+        // The browser's orderId is only compared with the order id stored on the link; Tamara is asked about the stored one.
+        return app(TamaraDyLinkVerifier::class)->verify($payment, (string) $request->orderId);
     }
 
     /** Is this link's payment paid at the provider? 'paid' | 'not_paid' | 'unknown' (throws if the provider cannot be reached). */
@@ -560,19 +385,7 @@ class DyController extends Controller
             };
         }
 
-        $id = (string) $payment->payment_reference_id;
-
-        if ($id === '') {
-            return 'unknown';
-        }
-
-        $verdict = TamaraOrderVerification::evaluate(app(TamaraService::class)->getOrderStatus($id), (string) $payment->dy_reference_id, $payment->amount)['verdict'];
-
-        return match ($verdict) {
-            TamaraOrderVerification::NEEDS_AUTHORISE, TamaraOrderVerification::AUTHORISED, TamaraOrderVerification::CAPTURED => 'paid',
-            TamaraOrderVerification::PENDING, TamaraOrderVerification::REJECTED                                              => 'not_paid',
-            default                                                                                                          => 'unknown',
-        };
+        return app(TamaraDyLinkVerifier::class)->standing($payment);
     }
 
     private function dyLinkResultView(DyPaymentLink $payment, string $status)

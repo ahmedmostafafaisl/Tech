@@ -54,9 +54,27 @@ return [
     'tamara' => [
         'api_url' => env('TAMARA_API_URL', 'https://api.tamara.co/'),
         'api_key' => env('TAMARA_API_KEY', 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhY2NvdW50SWQiOiI0YTE0MTRmNi00YzIxLTRjYTEtYWQ5Ny1hNjI0YzJlYTc4MGYiLCJ0eXBlIjoibWVyY2hhbnQiLCJzYWx0IjoiY2Q4ODJkMGJlYWNlZGQ5NjJhZTBkODA0YjJmNDY1ZDkiLCJpYXQiOjE2Nzc2NDI5OTIsImlzcyI6IlRhbWFyYSBQUCJ9.nDy-pqpIx8Cc9iUaK9tzu89-JRdQJDRcWF7nXAaHfwRj8VNK2zHh07Rba0VGdVCczYBQq4PzAju05X-yDef-uUGvFgI9pLNpauItON4ci51qtIllRP5Pntv0lMXDZXngkvtT8wXRWOxiIwRav-7k4PQnKSQyCImCkUhBWQ5i_f8UnLa2BwXJvsCPRBJjd2d2fP4PHcUh3i7KOoEJoTlLfUG7MjW4GGdPY4lTZB9RHLXYY4f1G02aGMWuhzItksLlch5yMg2tdvQoFPTw7BtZZ1f5s81ESQydE-Yw71Q4sE15mU22KBOdczfP1rQ-9Gf70TFAmbzma7JU7SDr3hxMxQ'),
-        // Verifies the signature of Tamara's notifications (merchant portal -> Notification token).
-        // Deliberately NO default: when unset, the DY Tamara webhook rejects every request.
+        // OPTIONAL. If set, a Tamara JWT signed with this key counts as an authenticated notification. Webhook
+        // processing never depends on it: Tamara's API is always asked before a payment is changed.
         'notification_token' => env('TAMARA_NOTIFICATION_TOKEN'),
+
+        // HTTP limits for every call to Tamara (the client used to have none, so a hung call held a PHP worker).
+        'timeout'         => (int) env('TAMARA_HTTP_TIMEOUT', 20),
+        'connect_timeout' => (int) env('TAMARA_HTTP_CONNECT_TIMEOUT', 5),
+
+        // The webhook this application registers with Tamara (php artisan tamara:webhook:register).
+        'webhook' => [
+            'type'   => 'order',
+            // Event names to subscribe to, as in the agreed registration payload. Override with a comma-separated
+            // TAMARA_WEBHOOK_EVENTS if Tamara's documentation says otherwise. Processing is event-agnostic: the
+            // name is only logged, Tamara's order status decides.
+            'events' => array_values(array_filter(array_map('trim', explode(',', (string) env(
+                'TAMARA_WEBHOOK_EVENTS',
+                'order_approved,order_authorised,order_canceled,order_updated,order_captured,order_refunded'
+            ))))),
+            // Hosts the webhook URL may be updated to through the API. Default (empty): only the host of APP_URL.
+            'allowed_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('TAMARA_WEBHOOK_ALLOWED_HOSTS', ''))))),
+        ],
     ],
 
     'dy365' => [

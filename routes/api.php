@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\CompleteForm\AppointmentFormSubmissionController;
 use App\Http\Controllers\Api\CompleteForm\CompleteFormController;
 use App\Http\Controllers\Api\Customer\CustomerController;
 use App\Http\Controllers\Api\Dashboard\DashboardController;
+use App\Http\Controllers\Api\Dashboard\DirectPaymentController;
 use App\Http\Controllers\Api\DY365\DyController;
 use App\Http\Controllers\Api\DY365\SchedulerController;
 use App\Http\Controllers\Api\Evaluation\EvaluationMessageController;
@@ -28,6 +29,8 @@ use App\Http\Controllers\Api\Payment\ClickPayController;
 use App\Http\Controllers\Api\Payment\TabbyPaymentController;
 use App\Http\Controllers\Api\Payment\TabbyWebhookController;
 use App\Http\Controllers\Api\Payment\TamaraPaymentController;
+use App\Http\Controllers\Api\Payment\TamaraWebhookController;
+use App\Http\Controllers\Api\Payment\TamaraWebhookManagementController;
 use App\Http\Controllers\Api\Pdf\Invoice2Controller;
 use App\Http\Controllers\Api\Service\ServiceController;
 use App\Http\Controllers\Api\Settings\InvoiceSettingController;
@@ -427,7 +430,14 @@ Route::get('/tabby/failure', [TabbyPaymentController::class, 'failure'])->name('
 Route::get('/tamara/success', [TamaraPaymentController::class, 'success'])->name('tamara.success');
 Route::get('/tamara/cancel', [TamaraPaymentController::class, 'cancel'])->name('tamara.cancel');
 Route::get('/tamara/failure', [TamaraPaymentController::class, 'failure'])->name('tamara.failure');
-Route::post('/tamara/webhook', [TamaraPaymentController::class, 'handle'])->name('tamara.webhook');
+// Stable Tamara webhook (the URL registered with Tamara by `php artisan tamara:webhook:register`). Public: Tamara calls it,
+// and the processor never trusts the request, it verifies the order with Tamara's API.
+Route::post('/tamara/webhook', TamaraWebhookController::class)->name('tamara.webhook');
+// Reading / updating the registered webhook: logged-in admins only. The secret is never returned or settable here.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->group(function () {
+    Route::get('/tamara/webhook', [TamaraWebhookManagementController::class, 'show'])->name('tamara.webhook.show');
+    Route::match(['put', 'patch'], '/tamara/webhook', [TamaraWebhookManagementController::class, 'update'])->name('tamara.webhook.update');
+});
 // ClickPay payment routes
 // NOTE: /create initiates a real charge and /refund moves real money — both require
 // an authenticated staff/technician session. Return + callback endpoints stay public
@@ -715,6 +725,9 @@ Route::middleware('auth:sanctum')->prefix('dashboard')->group(function () {
     Route::get('/tech/{id}', [DashboardController::class, 'getSingleTechnician']);
     Route::get('/direct-appointment/{id}', [DashboardController::class, 'getSingleDirectAppointment']);
     Route::get('/direct-appointments', [DashboardController::class, 'getDirectAppointments']);
+    // 🔹 Direct payments (tabby / tamara / clickpay): paginated; filter by type, date, reference id / payment id
+    Route::get('/direct-payments', [DirectPaymentController::class, 'index'])
+        ->middleware('role_or_permission:super_admin|admin|view payments');
     Route::get('/technicians/{techId}/logs', [DashboardController::class, 'getTechnicianLogs']);
     Route::get('/technicians/{techId}/direct-appointments', [DashboardController::class, 'getTechnicianDirectAppointments']);
     Route::post('/direct-appointments/send-completion', [DashboardController::class, 'sendForCompletion']);
