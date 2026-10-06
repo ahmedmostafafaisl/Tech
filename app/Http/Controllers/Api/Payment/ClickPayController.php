@@ -9,10 +9,12 @@ use App\Models\ClickPayPayment;
 use App\Models\DirectAppointment;
 use App\Services\DY365\DyService;
 use App\Models\AppointmentPayment;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use App\Models\DirectAppointmentPayment;
 use App\Services\Payment\ClickPayService;
+use App\Services\DY365\DyAcknowledgement;
 use App\Services\Payment\ClickPayPaymentSyncService;
 use App\Http\Controllers\Api\DY365\DyController;
 use App\Services\CheckCompleteStatus\CheckCompleteService;
@@ -352,49 +354,113 @@ class ClickPayController extends Controller
     }
 
     // dy handle
+    /**
+     * ClickPay's browser return for a DY payment link.
+     *
+     * ClickPay is asked FIRST. DY365 hears "Approved" only for a payment ClickPay reports as Authorised
+     * (this handler used to say "Approved" before asking anything, so a declined or abandoned payment was
+     * reported as approved), and only once. The query string can no longer pick another provider's link.
+     */
     public function dyHandleReturn(Request $request)
     {
-        $payment = DyPaymentLink::where('payment_method', $request->payment_type)
+        $payment = DyPaymentLink::where('payment_method', 'clickpay')
             ->where('dy_reference_id', $request->reference_id)
             ->first();
 
         if (!$payment) {
             return view('Payment.result', [
-                'status' => 'failed',
+                'status'          => 'failed',
                 'payment_type'    => 'clickpay',
-                'message' => 'Payment not found',
-                "price" => 0,
+                'message'         => 'Payment not found',
+                "price"           => 0,
                 'payment'         => $payment,
                 'priceWithoutTax' => 0,
                 'taxAmount'       => 0,
             ]);
         }
 
-        $dyController = app(DyController::class);
-        $dyController->handlePaymentStatus($payment, "Approved");
+        // A replay of a payment that is already complete: nothing to verify, nothing to tell DY365 again.
+        if (in_array($payment->status, ['paid', 'success'], true)) {
+            return $this->dyReturnView($payment, 'paid');
+        }
 
-        $totalAmount     = $payment->price;
+        try {
+            $data = json_decode(json_encode($this->clickPay->handleReturn($payment->payment_reference_id)), true);
+        } catch (\Throwable $e) {
+            Log::error('ClickPay DY return: could not query ClickPay; link left unchanged', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return $this->dyReturnView($payment, 'failed');
+        }
+
+        $message = $data['payment_result']['response_message'] ?? null;
+
+        if ($message === null) {
+            // no usable answer from ClickPay: change nothing, tell nobody
+            Log::warning('ClickPay DY return: unusable reply; link left unchanged', ['dy_reference_id' => $payment->dy_reference_id]);
+
+            return $this->dyReturnView($payment, 'failed');
+        }
+
+        if ($message !== 'Authorised') {
+            // ClickPay explicitly did not authorise it (declined, voided, expired...). DY365 is no longer told "Approved".
+            if (in_array($payment->status, ['created', 'pending', 'cancelled'], true)) {
+                $payment->update(['status' => 'failed']);
+            }
+
+            return $this->dyReturnView($payment->fresh(), 'failed');
+        }
+
+        // Authorised: it must also be the amount and currency this link was created for.
+        $charged  = $data['cart_amount'] ?? null;
+        $currency = $data['cart_currency'] ?? null;
+
+        if (($charged !== null && (!is_numeric($charged) || abs((float) $charged - (float) $payment->amount) >= 0.005))
+            || ($currency !== null && strtoupper((string) $currency) !== 'SAR')) {
+            Log::warning('ClickPay DY return: authorised payment does not match the link amount/currency; link left unchanged', [
+                'dy_reference_id' => $payment->dy_reference_id,
+            ]);
+
+            return $this->dyReturnView($payment, 'failed');
+        }
+
+        try {
+            DB::transaction(function () use ($payment) {
+                $locked = DyPaymentLink::whereKey($payment->id)->lockForUpdate()->first();
+
+                if (in_array($locked->status, ['paid', 'success'], true)) {
+                    return;   // a concurrent or repeated request got here first
+                }
+
+                if (!DyAcknowledgement::accepted(app(DyController::class)->handlePaymentStatus($locked, 'Approved'))) {
+                    throw new \RuntimeException('DY365 did not accept the Approved notification');
+                }
+
+                $locked->update(['status' => 'paid']);
+            });
+        } catch (\Throwable $e) {
+            Log::error('ClickPay DY return: DY365 did not accept the notification; link left unchanged', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
+        }
+
+        return $this->dyReturnView($payment->fresh(), 'paid');
+    }
+
+    private function dyReturnView(DyPaymentLink $payment, string $status)
+    {
+        // The link's amount column is `amount` (this used to read a `price` column that does not exist, so the page showed 0).
+        $totalAmount     = (float) $payment->amount;
         $priceWithoutTax = round($totalAmount / 1.15, 2);
         $taxAmount       = round($totalAmount - $priceWithoutTax, 2);
 
-        $data = $this->clickPay->handleReturn($payment->payment_reference_id);
-
-        $data = json_decode(json_encode($data), true);
-
-        if (
-            isset($data['payment_result']['response_message']) &&
-            ($data['payment_result']['response_message']) === 'Authorised'
-        ) {
-            $payment->status = 'paid';
-            $payment->save();
-        } else {
-            if ($payment->status != 'paid') {
-                $payment->status = 'failed';
-                $payment->save();
-            }
-        }
         return view('Payment.result', [
-            'status'          => $payment->status,
+            'status'          => $status,
             'payment_type'    => 'clickpay',
             'payment'         => $payment,
             'phone'           => $payment->phone ?? $payment->payment_reference_id,
@@ -512,42 +578,91 @@ class ClickPayController extends Controller
      */
     public function newRefund(Request $request)
     {
+        // INTERNAL endpoint, not a ClickPay callback: it moves real money, so routes/api.php
+        // puts it behind auth:sanctum + an admin role. Everything below is defence in depth.
         $validated = $request->validate([
             'reference_id' => 'required|string',
             'amount'       => 'required|numeric|min:0.01',
             'reason'       => 'nullable|string|max:255',
         ]);
 
-        $payment = DirectAppointmentPayment::where('reference_id', $validated['reference_id'])->first();
+        $actorId = $request->user()?->id;
 
-        if (!$payment) {
-            return response()->json(['success' => false, 'message' => 'Payment not found.'], 404);
-        }
+        // One refund at a time per payment: the row is locked while the provider is called, so a
+        // double click or a retry cannot refund twice.
+        return DB::transaction(function () use ($validated, $actorId) {
+            $payment = DirectAppointmentPayment::where('reference_id', $validated['reference_id'])
+                ->lockForUpdate()
+                ->first();
 
-        if ($payment->status !== 'paid') {
-            return response()->json(['success' => false, 'message' => 'Only paid payments can be refunded.'], 422);
-        }
+            if (!$payment) {
+                return response()->json(['success' => false, 'message' => 'Payment not found.'], 404);
+            }
 
-        $tranRef = $payment->payment_id ?: $payment->reference_id;
-        $reason = $validated['reason'] ?? 'Customer refund';
+            if ($payment->status !== 'paid') {
+                return response()->json(['success' => false, 'message' => 'Only paid payments can be refunded.'], 422);
+            }
 
-        $response = $this->clickPay->refund($tranRef, $validated['amount'], $reason);
+            $amount = round((float) $validated['amount'], 2);
 
-        if (isset($response['response_code']) && $response['response_code'] === '000') {
-            $payment->update(['status' => 'refunded']);
+            if ($amount > round((float) $payment->price, 2)) {
+                return response()->json(['success' => false, 'message' => 'Refund amount exceeds the paid amount.'], 422);
+            }
+
+            $tranRef = $payment->payment_id ?: $payment->reference_id;
+            $reason  = $validated['reason'] ?? 'Customer refund';
+
+            Log::info('ClickPay refund requested', [
+                'by_user_id'   => $actorId,
+                'reference_id' => $payment->reference_id,
+                'amount'       => $amount,
+            ]);
+
+            try {
+                $response = $this->clickPay->refund($tranRef, $amount, $reason);
+            } catch (\Throwable $e) {
+                // The outcome at ClickPay is unknown (timeout, non-JSON reply...). Never guess "refunded":
+                // leave the payment untouched and tell the admin to confirm it in the ClickPay dashboard.
+                Log::error('ClickPay refund could not be confirmed; payment left unchanged', [
+                    'by_user_id'   => $actorId,
+                    'reference_id' => $payment->reference_id,
+                    'error'        => $e->getMessage(),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The refund could not be confirmed with ClickPay. Check the ClickPay dashboard before retrying.',
+                ], 502);
+            }
+
+            if (isset($response['response_code']) && $response['response_code'] === '000') {
+                $payment->update(['status' => 'refunded']);
+
+                Log::info('ClickPay refund succeeded', [
+                    'by_user_id'   => $actorId,
+                    'reference_id' => $payment->reference_id,
+                    'amount'       => $amount,
+                ]);
+
+                return response()->json([
+                    'success'  => true,
+                    'message'  => 'Refund successful.',
+                    'response' => $response,
+                ]);
+            }
+
+            Log::warning('ClickPay refund failed', [
+                'by_user_id'   => $actorId,
+                'reference_id' => $payment->reference_id,
+                'response'     => $response,
+            ]);
 
             return response()->json([
-                'success'  => true,
-                'message'  => 'Refund successful.',
+                'success'  => false,
+                'message'  => 'Refund failed.',
                 'response' => $response,
-            ]);
-        }
-
-        return response()->json([
-            'success'  => false,
-            'message'  => 'Refund failed.',
-            'response' => $response,
-        ], 422);
+            ], 422);
+        });
     }
 
     // NEW: GET /integration/clickpay/payment-details?tran_ref=...

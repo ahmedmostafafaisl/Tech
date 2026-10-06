@@ -17,8 +17,10 @@ interface UserRepositoryInterface
     public function store(array $data);
     public function update(array $data, $user);
     public function findByPhone($phone);
+    public function issueOtp(User $user): int;
+    public function issueDefaultOtp(User $user, string $code): void;
     public function verifyOtp($phone, $otp);
-    public function verifyPinCode($user, $pinCode);
+    public function verifyPinCode($user, $pinCode, bool $authenticated = false);
     public function updatePinCode(User $user,  $oldPin,  $newPinCode);
     public function login(array $credentials);
     public function register(array $data);

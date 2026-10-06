@@ -83,8 +83,17 @@ class UserController extends Controller
     {
         $user = $this->userRepository->findByPhone($request->phone);
         if (!$user) return response()->json(['message' => 'User not found'], 404);
-        $otp = rand(1000, 9999);
-        $user->update(['otp' => $otp]);
+
+        // A configured test / app-review account (see DefaultOtp): issue the default code, send no SMS.
+        // verify-otp still checks it like any OTP (5 minute expiry, single use, attempt lockout).
+        if (($defaultCode = \App\Services\Auth\DefaultOtp::codeFor($user->phone)) !== null) {
+            $this->userRepository->issueDefaultOtp($user, $defaultCode);
+            \Illuminate\Support\Facades\Log::warning('Default OTP issued; no SMS sent', ['user_id' => $user->id]);
+
+            return $this->setCode(200)->setData($user->email)->setMessage('OTP sent successfully.')->send();
+        }
+
+        $otp = $this->userRepository->issueOtp($user);
         $response = $this->smsService->sendOtp($request->phone, $otp);
 
         $email = $user->email;
@@ -112,6 +121,7 @@ class UserController extends Controller
                 ->send();
         }
         // Use auth user if available
+        $authenticated = auth('api')->check();
         $user = auth('api')->user();
         if (!$user) {
             $user = $this->userRepository->findByPhone($request->phone);
@@ -119,7 +129,7 @@ class UserController extends Controller
                 return  $this->setCode(404)->setData([])->setMessage('User not Found')->send();
             }
         }
-        $response = $this->userRepository->verifyPinCode($user, $request->pin_code);
+        $response = $this->userRepository->verifyPinCode($user, $request->pin_code, $authenticated);
 
         $data = $response->getData(true); // Convert JSON response to array
         $data['need_update'] = $request->update_version != '1.3.7';

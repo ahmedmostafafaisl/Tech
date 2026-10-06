@@ -11,6 +11,9 @@ use App\Helper\ApiResponseHelper;
 use Spatie\Permission\Models\Role;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use App\Models\Setting;
+use App\Services\Auth\AuthAttemptLimiter;
 use App\Services\Logs\UserLogService;
 use App\Http\Resources\User\UserResource;
 use App\Http\Resources\User\SingleUserTasks;
@@ -23,6 +26,12 @@ use App\Repositories\Interfaces\UserRepositoryInterface;
 class UserRepository implements UserRepositoryInterface
 {
     use ApiResponseHelper;
+
+    /** A freshly issued OTP is valid for this long. */
+    private const OTP_TTL_MINUTES = 5;
+
+    /** After a correct OTP the PIN step may rely on that proof for this long. */
+    private const OTP_PROOF_MINUTES = 10;
     protected  $userLogService;
     public function __construct(UserLogService $userLogService)
     {
@@ -296,36 +305,107 @@ class UserRepository implements UserRepositoryInterface
         return User::where('phone', $phone)->where('status', 'active')->first();
     }
 
-    public function verifyOtp($phone, $otp)
+    public function issueOtp(User $user): int
     {
-        $user = User::where('phone', $phone)->first();
+        $otp = random_int(1000, 9999);
 
-        if ($otp == '0102' || $phone == '0565268773') {
-            return  $this->setCode(200)->setData(new UserResource($user))->setMessage('OTP verified, enter PIN code')->send();
-        }
-        if (!$user || $user->otp !== $otp) {
-            return  $this->setCode(401)->setData([])->setMessage('Invalid OTP')->send();
-        }
+        $user->forceFill([
+            'otp'                => (string) $otp,
+            'otp_expires_at'     => now()->addMinutes(self::OTP_TTL_MINUTES),
+            'otp_verified_until' => null,
+        ])->save();
 
-        return  $this->setCode(200)->setData(new UserResource($user))->setMessage('OTP verified, enter PIN code')->send();
+        return $otp;
     }
 
-    public function verifyPinCode($user, $pinCode)
+    /**
+     * The configured default OTP (see DefaultOtp) is stored exactly like a random one: it expires, it is single
+     * use, and verifyOtp() checks it through the normal path. No SMS is sent for it.
+     */
+    public function issueDefaultOtp(User $user, string $code): void
     {
+        $user->forceFill([
+            'otp'                => $code,
+            'otp_expires_at'     => now()->addMinutes(self::OTP_TTL_MINUTES),
+            'otp_verified_until' => null,
+        ])->save();
+    }
 
-        // Check if user exists
-        if (!$user) {
+    public function verifyOtp($phone, $otp)
+    {
+        // Active accounts only: the same lookup the controller already performs.
+        $user = $this->findByPhone($phone);
+
+        if (! $user) {
+            return $this->setCode(401)->setData([])->setMessage('Invalid OTP')->send();
+        }
+
+        $limiter = AuthAttemptLimiter::otp($user->id);
+
+        if ($limiter->tooManyAttempts()) {
+            return $this->tooManyAttempts();
+        }
+
+        // No bypass codes, no bypass phone numbers: only the code issued by sendOtp(),
+        // while it is unexpired, and only once.
+        if (! $this->otpMatches($user, $otp)) {
+            $limiter->hit();
+
+            return $this->setCode(401)->setData([])->setMessage('Invalid OTP')->send();
+        }
+
+        // Single use: burn the code and leave a short-lived server-side proof for the PIN step.
+        $user->forceFill([
+            'otp'                => null,
+            'otp_expires_at'     => null,
+            'otp_verified_until' => now()->addMinutes(self::OTP_PROOF_MINUTES),
+        ])->save();
+
+        $limiter->clear();
+
+        return $this->setCode(200)->setData(new UserResource($user))->setMessage('OTP verified, enter PIN code')->send();
+    }
+
+    public function verifyPinCode($user, $pinCode, bool $authenticated = false)
+    {
+        if (! $user) {
             return $this->setCode(401)->setData([])->setMessage('User not found')->send();
         }
 
-        // ✅ Skip PIN verification for a specific mobile number
-        // if ($user->phone != '0561583554') {
-        //     if (!Hash::check($pinCode, $user->pin_code)) {
-        //         return $this->setCode(401)->setData([])->setMessage('Invalid PIN Code')->send();
-        //     }
-        // }
+        $limiter = AuthAttemptLimiter::pin($user->id);
 
-        // Generate token
+        if ($limiter->tooManyAttempts()) {
+            return $this->tooManyAttempts();
+        }
+
+        if (filled($user->pin_code)) {
+            if (! $this->pinMatches($user, $pinCode)) {
+                $limiter->hit();
+
+                return $this->setCode(401)->setData([])->setMessage('Invalid PIN Code')->send();
+            }
+
+            // Optional hardening, OFF until the mobile app is confirmed to always run
+            // send-otp -> verify-otp before verify-pin: also demand the OTP proof for a new login.
+            if (
+                ! $authenticated
+                && Setting::isActive('auth_require_otp_for_pin_login')
+                && ! $this->hasOtpProof($user)
+            ) {
+                return $this->setCode(401)->setData([])->setMessage('OTP verification required')->send();
+            }
+        } elseif (! $authenticated && ! $this->hasOtpProof($user)) {
+            // No PIN set yet (an admin created the account without one). The only legitimate way
+            // in is a fresh, valid OTP — never a bare phone number.
+            return $this->setCode(401)->setData([])->setMessage('OTP verification required')->send();
+        }
+
+        $limiter->clear();
+
+        if ($user->otp_verified_until !== null) {
+            $user->forceFill(['otp_verified_until' => null])->save();
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return $this->setCode(200)
@@ -334,6 +414,49 @@ class UserRepository implements UserRepositoryInterface
                 "token" => $token
             ])
             ->setMessage('You are successfully logged in.')
+            ->send();
+    }
+
+    private function otpMatches(User $user, mixed $otp): bool
+    {
+        $given  = is_scalar($otp) ? trim((string) $otp) : '';
+        $stored = (string) ($user->otp ?? '');
+
+        // An empty/missing OTP on either side must never compare equal to the other.
+        return $given !== ''
+            && $stored !== ''
+            && $user->otp_expires_at !== null
+            && $user->otp_expires_at->isFuture()
+            && hash_equals($stored, $given);
+    }
+
+    private function hasOtpProof(User $user): bool
+    {
+        return $user->otp_verified_until !== null && $user->otp_verified_until->isFuture();
+    }
+
+    private function pinMatches(User $user, mixed $pinCode): bool
+    {
+        if (! is_string($pinCode) || $pinCode === '') {
+            return false;
+        }
+
+        try {
+            return Hash::check($pinCode, (string) $user->pin_code);
+        } catch (\RuntimeException $e) {
+            // A legacy row whose PIN is not a bcrypt hash: treat as "does not match" instead of a 500,
+            // and leave a trace so operations can find and reset that account.
+            Log::warning('PIN is not stored as a bcrypt hash; verification refused', ['user_id' => $user->id]);
+
+            return false;
+        }
+    }
+
+    private function tooManyAttempts()
+    {
+        return $this->setCode(429)
+            ->setData([])
+            ->setMessage('Too many failed attempts. Please wait a few minutes and try again.')
             ->send();
     }
 

@@ -321,7 +321,14 @@ Route::middleware('auth:sanctum')->prefix('emergency')->group(function () {
     Route::delete('/item/conditions', [EmergencyItemConditionController::class, 'destroyByMainItem']);
 });
 
-Route::apiResource('user-logs', UserLogController::class);
+// user-logs: reads are unchanged (flagged for Patch B); every mutation now needs a login.
+Route::apiResource('user-logs', UserLogController::class)->only(['index', 'show']);
+Route::middleware('auth:sanctum')->group(function () {
+    Route::apiResource('user-logs', UserLogController::class)->only(['store']);
+    Route::middleware('role:super_admin|admin')->group(function () {
+        Route::apiResource('user-logs', UserLogController::class)->only(['update', 'destroy']);
+    });
+});
 Route::get('user-logs/auth/user', [UserLogController::class, 'getAuthUserLogs'])->middleware('auth:sanctum');
 
 // sync custom warehouse stock  by item number
@@ -484,12 +491,14 @@ Route::post('/whatsapp/send', [WhatsAppController::class, 'sendMessage']);
 // WhatsApp PDF link
 Route::post('/appointments/{appointmentId}/send-invoice', [DyController::class, 'sendInvoice']);
 
-Route::post('/services/import', [ServiceController::class, 'import'])->name('services.import');
 Route::get('/services', [ServiceController::class,  'index'])->name('services.index');
-Route::post('/services', [ServiceController::class, 'store'])->name('services.store');
-Route::post('/services/{id}', [ServiceController::class, 'show'])->name('services.show');
-Route::post('/services/{id}', [ServiceController::class, 'update'])->name('services.update');
-Route::post('/services/{id}/delete', [ServiceController::class, 'delete'])->name('services.delete');
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->group(function () {
+    Route::post('/services/import', [ServiceController::class, 'import'])->name('services.import');
+    Route::post('/services', [ServiceController::class, 'store'])->name('services.store');
+    Route::post('/services/{id}', [ServiceController::class, 'show'])->name('services.show');
+    Route::post('/services/{id}', [ServiceController::class, 'update'])->name('services.update');
+    Route::post('/services/{id}/delete', [ServiceController::class, 'delete'])->name('services.delete');
+});
 
 //  fix appointments data
 Route::middleware('auth:sanctum')->post('/fix-appointments-data', [NewDirectIntegrationController::class, 'fixAppointments']);
@@ -498,7 +507,7 @@ Route::middleware('auth:sanctum')->post('/test-complete-v2', [NewDirectIntegrati
 
 Route::post('/run-appointments-reminder', [NewDirectIntegrationController::class, 'run_reminder']);
 
-Route::get('/empty-jobs', function () {
+Route::middleware(['auth:sanctum', 'role:super_admin'])->get('/empty-jobs', function () {
     DB::table('jobs')->truncate();
 
     return '✅ Jobs table emptied successfully.';
@@ -556,7 +565,7 @@ Route::get('/appointments/all/completed', function (Request $request) {
     ]);
 });
 
-Route::get('flag/appointments/true', function (Request $request) {
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('flag/appointments/true', function (Request $request) {
     $sales_order_id = $request->input('sales_order_id');
     $appointments = Appointment::where('sales_order_id', $sales_order_id)->first();
     $appointments->v2_flag = true;
@@ -574,7 +583,7 @@ Route::get('specific/appointments', function (Request $request) {
         ->get();
 });
 
-Route::get('logout/users', function (Request $request) {
+Route::middleware(['auth:sanctum', 'role:super_admin'])->get('logout/users', function (Request $request) {
     PersonalAccessToken::query()->delete();
 });
 
@@ -681,7 +690,7 @@ Route::get('/integration/tamara/failure/reference_id={reference_id}/sales_order_
 Route::post('/integration/tamara/notification/reference_id={reference_id}/sales_order_id={sales_order_id}', [TamaraPaymentController::class, 'newNotification'])->name('new.tamara.notification');
 
 // ClickPay new integration
-Route::post('/integration/clickpay/success/reference_id={reference_id}/sales_order_id={sales_order_id}', [ClickPayController::class, 'newRefund'])->name('new.clickpay.refund');
+Route::post('/integration/clickpay/success/reference_id={reference_id}/sales_order_id={sales_order_id}', [ClickPayController::class, 'newRefund'])->middleware(['auth:sanctum', 'role:super_admin|admin'])->name('new.clickpay.refund');
 Route::post('/integration/clickpay/callback', [ClickPayController::class, 'newHandleCallback'])->name('new.clickpay.callback');
 Route::match(['get', 'post'], '/integration/clickpay/return', [ClickPayController::class, 'newHandleReturn'])->name('new.clickpay.return');
 
@@ -692,7 +701,7 @@ Route::get('/invoice', function (Request $request) {
 Route::get('/integration/get-or-update-invoice/{sales_order_id}', [NewDirectIntegrationController::class, 'generateInvoicePdf']);
 
 Route::post('/check-version', [AppVersionController::class, 'check']);
-Route::post('/app-version/update', [AppVersionController::class, 'updateAppVersion']);
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->post('/app-version/update', [AppVersionController::class, 'updateAppVersion']);
 
 // getAmountDifferences
 Route::post('/getAmountDifferences', [NewDirectIntegrationController::class, 'getAmountDifferences']);
@@ -987,7 +996,7 @@ Route::middleware('auth:sanctum')->get('/admin/system/config-health', [SystemHea
 // Create-or-update a ChangeRequest for an appointment (matched by book_id + sales_order_id)
 Route::post('/change-requests/upsert', [ChangeRequestController::class, 'upsert']);
 
-Route::get('/specific/book_id/serial/{bookId}', [NewDirectIntegrationController::class, 'deleteAppointmentTransactionSerials']);
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('/specific/book_id/serial/{bookId}', [NewDirectIntegrationController::class, 'deleteAppointmentTransactionSerials']);
 
 // Search for a specific serial across appointment transaction serials
 Route::middleware('auth:sanctum')->post('/integration/appointment-transaction-serials/search', [NewDirectIntegrationController::class, 'searchAppointmentTransactionSerial']);

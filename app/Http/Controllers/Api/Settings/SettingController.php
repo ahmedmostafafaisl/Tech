@@ -35,10 +35,21 @@ class SettingController extends Controller
 
 
     // ===== NEW: list every setting (public) =====
+    private function protectedSettingResponse()
+    {
+        return response()->json([
+            'status'  => false,
+            'message' => 'This setting can only be changed on the server (php artisan otp:default).',
+        ], 403);
+    }
+
     public function indexAll()
     {
         return response()->json(
-            \App\Models\Setting::pluck('value', 'key')
+            // the default-OTP keys (code + allowlist) are server-side only: never listed here
+            \App\Models\Setting::all()
+                ->reject(fn($setting) => \App\Services\Auth\DefaultOtp::isProtectedKey($setting->key))
+                ->pluck('value', 'key')
         );
     }
 
@@ -46,7 +57,9 @@ class SettingController extends Controller
     // ===== NEW: get one setting by key (public) =====
     public function show(string $key)
     {
-        $setting = \App\Models\Setting::where('key', $key)->first();
+        $setting = \App\Services\Auth\DefaultOtp::isProtectedKey($key)
+            ? null   // behaves as "not found": the value must not be readable here
+            : \App\Models\Setting::where('key', $key)->first();
 
         if (!$setting) {
             return response()->json(['status' => false, 'message' => 'Not found.'], 404);
@@ -58,6 +71,10 @@ class SettingController extends Controller
     // ===== NEW: create a setting (protected) =====
     public function store(\Illuminate\Http\Request $request)
     {
+        if (\App\Services\Auth\DefaultOtp::isProtectedKey((string) $request->input('key'))) {
+            return $this->protectedSettingResponse();
+        }
+
         $validated = $request->validate([
             'key'   => ['required', 'string', 'max:255', \Illuminate\Validation\Rule::unique('settings', 'key')],
             'value' => ['required', 'string'],
@@ -75,6 +92,10 @@ class SettingController extends Controller
     // ===== NEW: update a setting by key (protected) =====
     public function update(\Illuminate\Http\Request $request, string $key)
     {
+        if (\App\Services\Auth\DefaultOtp::isProtectedKey($key)) {
+            return $this->protectedSettingResponse();
+        }
+
         $setting = \App\Models\Setting::where('key', $key)->first();
 
         if (!$setting) {
@@ -97,6 +118,10 @@ class SettingController extends Controller
     // ===== NEW: delete a setting by key (protected) =====
     public function destroy(string $key)
     {
+        if (\App\Services\Auth\DefaultOtp::isProtectedKey($key)) {
+            return $this->protectedSettingResponse();
+        }
+
         $setting = \App\Models\Setting::where('key', $key)->first();
 
         if (!$setting) {

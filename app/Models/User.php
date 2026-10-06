@@ -40,7 +40,16 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'pin_code',
-        // 'otp'
+        // The OTP and its bookkeeping must never be serialised: a raw User model
+        // is returned by a few endpoints, and a readable OTP is a login credential.
+        'otp',
+        'otp_expires_at',
+        'otp_verified_until',
+    ];
+
+    protected $casts = [
+        'otp_expires_at'     => 'datetime',
+        'otp_verified_until' => 'datetime',
     ];
 
     public function customerAppointments()

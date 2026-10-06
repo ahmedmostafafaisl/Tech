@@ -28,6 +28,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Services\Payment\TamaraWebhookSignature;
+use App\Services\DY365\DyAcknowledgement;
+use App\Services\Payment\TamaraOrderVerification;
+use App\Services\Payment\TabbyPaymentVerification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -47,17 +51,8 @@ class DyController extends Controller
 
     protected $checkCompleteService;
 
-    public function __construct(
-        AppointmentRepositoryInterface $appointmentRepo,
-        DyService $dy_service,
-        WarehouseInterface $warehouseRepo,
-        TechRepositoryInterface $techRepository,
-        TabbyService $tabbyService,
-        TamaraService $tamaraService,
-        TransferOrderInterface $transferOrderRepo,
-        TaqnyatSmsService $taqnyatSmsService,
-        CheckCompleteService $checkCompleteService
-    ) {
+    public function __construct(AppointmentRepositoryInterface $appointmentRepo, DyService $dy_service, WarehouseInterface $warehouseRepo, TechRepositoryInterface $techRepository, TabbyService $tabbyService, TamaraService $tamaraService, TransferOrderInterface $transferOrderRepo, TaqnyatSmsService $taqnyatSmsService, CheckCompleteService $checkCompleteService)
+    {
         $this->dy_service = $dy_service;
         $this->warehouseRepo = $warehouseRepo;
         $this->techRepository = $techRepository;
@@ -139,149 +134,115 @@ class DyController extends Controller
     }
 
     // Tabby success
+    /**
+     * Browser redirect after the customer paid a DY payment link with Tabby or Tamara.
+     *
+     * The URL is public and everything in it is guessable (PAY-000002466...), so it proves nothing. The link is
+     * completed, and DY365 told "Approved", only after the PROVIDER confirms the payment that was created for this
+     * link: same reference, same amount, SAR. Unverifiable or mismatching requests change nothing and notify nobody.
+     */
     public function success(Request $request, $reference_id)
     {
-        $payment = DyPaymentLink::where('payment_method', $request->payment_method)->where('dy_reference_id', $request->reference_id)->first();
+        $method  = (string) $request->payment_method;
+        $payment = DyPaymentLink::where('payment_method', $method)->where('dy_reference_id', $reference_id)->first();
+
         if (!$payment) {
             return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
         }
 
-        // start  payment status
-        $this->handlePaymentStatus($payment, "Approved");
-        // end  payment status
-
-        if ($request->payment_method == 'tabby') {
-            $payment->update([
-                'status' => 'success',
-                'payment_id' => $request->payment_id ?? null,
-            ]);
-        } else if ($request->payment_method == 'tamara') {
-            $orderId = $request->orderId;
-            $statusResponse = app(TamaraService::class)->getOrderStatus($orderId);
-            if (isset($statusResponse['status'])) {
-                if ($statusResponse['status'] === 'approved') {
-                    $authResponse = app(TamaraService::class)->authorizeOrder($orderId);
-                    // $captureResponse = app(TamaraService::class)->captureOrderNew($referenceId, $orderId);
-                    if (isset($authResponse['status']) && $authResponse['status'] === 'authorised') {
-                        $captureResponse = app(TamaraService::class)->captureOrderDy($reference_id, $orderId);
-                    }
-                } elseif ($statusResponse['status'] === 'authorised') {
-                    $captureResponse = app(TamaraService::class)->captureOrderDy($reference_id, $orderId);
-                }
-
-                // Mark success regardless of status flow
-
-            }
-            $payment->update([
-                'status' => 'success',
-                'payment_id' => $request->orderId ?? null,
-            ]);
-        } else if ($request->payment_method == 'clickpay') {
-            $payment->update([
-                'status' => 'success',
-            ]);
+        if (!in_array($method, self::DY_REDIRECT_METHODS, true)) {
+            // ClickPay links are completed by ClickPay's own verified return/callback, never by this URL.
+            return response()->json(['status' => 'error', 'message' => 'This payment method is not completed through this endpoint.'], 422);
         }
 
-        $totalAmount = $payment->amount; // this includes 15% VAT
+        // A replay of a link that is already complete: nothing to verify and nothing to tell DY365 again.
+        if ($payment->status === 'success') {
+            return $this->dyLinkResultView($payment, 'success');
+        }
 
-        $priceWithoutTax = round($totalAmount / 1.15, 2); // base price
-        $taxAmount = round($totalAmount - $priceWithoutTax, 2); // 15% VAT
+        if (!in_array($payment->status, self::DY_OPEN_STATES, true)) {
+            return response()->json(['status' => 'error', 'message' => 'This payment can no longer be completed.'], 409);
+        }
 
-        return view('Payment.result', [
-            'status' => 'success',
-            'payment_type' => $request->payment_method,
-            'payment' => $payment,
-            'priceWithoutTax' => $priceWithoutTax,
-            'taxAmount' => $taxAmount,
-        ]);
+        try {
+            $verified = $method === 'tabby'
+                ? $this->verifyDyTabbyLink($payment, $request)
+                : $this->verifyDyTamaraLink($payment, $request);
+        } catch (\Throwable $e) {
+            Log::error('DY payment link success: provider verification failed; link left unchanged', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'method'          => $method,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'The payment could not be verified with the provider. Please try again.'], 502);
+        }
+
+        if ($verified['outcome'] === 'error') {
+            return response()->json(['status' => 'error', 'message' => 'The payment could not be verified with the provider. Please try again.'], 502);
+        }
+
+        if ($verified['outcome'] === 'mismatch') {
+            Log::warning('DY payment link success: provider payment does not match the link', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'method'          => $method,
+                'reason'          => $verified['reason'] ?? null,
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'The provider payment does not match this payment link.'], 422);
+        }
+
+        if ($verified['outcome'] !== 'approved') {
+            // pending / rejected at the provider: nothing is confirmed, so nothing is changed
+            return $this->dyLinkResultView($payment, 'failed');
+        }
+
+        try {
+            $result = $this->completeDyLink($payment, ['status' => 'success', 'payment_id' => $verified['payment_id']], 'Approved');
+        } catch (\Throwable $e) {
+            Log::error('DY payment link success: DY365 did not accept the notification; link left unchanged', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
+        }
+
+        if ($result === 'invalid_state') {
+            return response()->json(['status' => 'error', 'message' => 'This payment can no longer be completed.'], 409);
+        }
+
+        return $this->dyLinkResultView($payment->fresh(), 'success');
     }
 
     public function cancel(Request $request, $reference_id)
     {
-
-        $payment = DyPaymentLink::where('payment_method', $request->payment_method)->where('dy_reference_id', $request->reference_id)->first();
-        if (!$payment) {
-            return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
-        }
-
-        // start  payment status
-        $this->handlePaymentStatus($payment, "Canceled");
-        // end  payment status
-
-        if ($request->payment_method == 'tabby') {
-            $payment->update([
-                'status' => 'cancelled',
-                'payment_id' => $request->payment_id ?? null,
-            ]);
-        } else if ($request->payment_method == 'tamara') {
-            $payment->update([
-                'status' => 'cancelled',
-                'payment_id' => $request->orderId ?? null,
-            ]);
-        } else if ($request->payment_method == 'clickpay') {
-            $payment->update([
-                'status' => 'cancelled',
-            ]);
-        }
-        // ❌ Handle canceled payment
-        $totalAmount = $payment->amount; // this includes 15% VAT
-
-        $priceWithoutTax = round($totalAmount / 1.15, 2); // base price
-        $taxAmount = round($totalAmount - $priceWithoutTax, 2); // 15% VAT
-
-        return view('Payment.result', [
-            'status' => 'cancelled',
-            'payment_type' => $request->payment_method,
-            'payment' => $payment,
-            'priceWithoutTax' => $priceWithoutTax,
-            'taxAmount' => $taxAmount,
-        ]);
+        return $this->dyLinkNotCompleted($request, $reference_id, 'cancelled', 'Canceled');
     }
 
     public function failure(Request $request, $reference_id)
     {
-        $payment = DyPaymentLink::where('payment_method', $request->payment_method)->where('dy_reference_id', $request->reference_id)->first();
-        if (!$payment) {
-            return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
-        }
-        // start  payment status
-        $this->handlePaymentStatus($payment, "Rejected");
-        // end  payment status
-
-        if ($request->payment_method == 'tabby') {
-            $payment->update([
-                'status' => 'failed',
-                'payment_id' => $request->payment_id ?? null,
-            ]);
-        } else if ($request->payment_method == 'tamara') {
-            $payment->update([
-                'status' => 'failed',
-                'payment_id' => $request->orderId ?? null,
-            ]);
-        } else if ($request->payment_method == 'clickpay') {
-            $payment->update([
-                'status' => 'failed',
-            ]);
-        }
-        // ⚠️ Handle failed payment
-        $totalAmount = $payment->amount; // this includes 15% VAT
-
-        $priceWithoutTax = round($totalAmount / 1.15, 2); // base price
-        $taxAmount = round($totalAmount - $priceWithoutTax, 2); // 15% VAT
-
-        return view('Payment.result', [
-            'status' => 'failed',
-            'payment_type' => $request->payment_method,
-            'payment' => $payment,
-            'priceWithoutTax' => $priceWithoutTax,
-            'taxAmount' => $taxAmount,
-        ]);
+        return $this->dyLinkNotCompleted($request, $reference_id, 'failed', 'Rejected');
     }
 
     public function tamaraWebhook(Request $request)
     {
-        // Validate webhook signature (Tamara sends this in the header)
-        $signature = $request->header('Tamara-Signature');
+        // Authenticate FIRST. Nothing below (payment state, DY365 notification) runs for a
+        // request that cannot prove it came from Tamara.
+        $notificationToken = (string) config('services.tamara.notification_token');
+
+        if ($notificationToken === '') {
+            Log::error('Tamara webhook rejected: TAMARA_NOTIFICATION_TOKEN is not configured');
+
+            return response()->json(['status' => 'error', 'message' => 'Webhook authentication is not configured.'], 503);
+        }
+
+        if (!TamaraWebhookSignature::authenticate(TamaraWebhookSignature::candidatesFrom($request), $notificationToken)) {
+            Log::warning('Tamara webhook rejected: missing or invalid signature', ['ip' => $request->ip()]);
+
+            return response()->json(['status' => 'error', 'message' => 'Invalid signature.'], 401);
+        }
+
         // Optional: verify $signature against your webhook secret if configured
 
         $payload = $request->all();
@@ -377,8 +338,256 @@ class DyController extends Controller
             ],
         ];
 
-        // Send payment status to service
-        $dyStatus = $this->dy_service->dyPaymentStatus($payload);
+        // The reply used to be thrown away; callers that care can now check DyAcknowledgement::accepted().
+        return $this->dy_service->dyPaymentStatus($payload);
+    }
+
+    /** Payment methods the tabby/tamara redirect URLs may complete. ClickPay has its own verified return URL. */
+    private const DY_REDIRECT_METHODS = ['tabby', 'tamara'];
+
+    /** A link in one of these states can still become success / cancelled / failed. */
+    private const DY_OPEN_STATES = ['created', 'pending', 'failed', 'cancelled'];
+
+    /**
+     * Cancel / failure redirects. A redirect can never undo a payment: a paid link is refused, the provider is
+     * asked whether the payment is actually paid, and DY365 is told once.
+     */
+    private function dyLinkNotCompleted(Request $request, $reference_id, string $newStatus, string $dyStatus)
+    {
+        $method  = (string) $request->payment_method;
+        $payment = DyPaymentLink::where('payment_method', $method)->where('dy_reference_id', $reference_id)->first();
+
+        if (!$payment) {
+            return response()->json(['status' => 'error', 'message' => 'Payment not found.'], 404);
+        }
+
+        if (!in_array($method, self::DY_REDIRECT_METHODS, true)) {
+            return response()->json(['status' => 'error', 'message' => 'This payment method is not handled through this endpoint.'], 422);
+        }
+
+        if (in_array($payment->status, ['success', 'paid'], true)) {
+            return response()->json(['status' => 'error', 'message' => 'This payment has already been completed.'], 409);
+        }
+
+        if ($payment->status === $newStatus) {
+            return $this->dyLinkResultView($payment, $newStatus);   // replay: DY365 already knows
+        }
+
+        if (!in_array($payment->status, self::DY_OPEN_STATES, true)) {
+            return response()->json(['status' => 'error', 'message' => 'This payment can no longer be changed.'], 409);
+        }
+
+        try {
+            $standing = $this->providerStandingOfDyLink($payment);
+        } catch (\Throwable $e) {
+            Log::warning('DY payment link ' . $newStatus . ': provider could not be asked', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
+            $standing = 'unknown';
+        }
+
+        if ($standing === 'paid') {
+            Log::warning('DY payment link ' . $newStatus . ' refused: the provider shows the payment as paid', ['dy_reference_id' => $payment->dy_reference_id]);
+
+            return response()->json(['status' => 'error', 'message' => 'The provider shows this payment as paid; it was not changed.'], 409);
+        }
+
+        if ($standing === 'unknown') {
+            // Cannot be confirmed: change nothing and tell nobody, but keep the customer's page as it was.
+            return $this->dyLinkResultView($payment, $newStatus);
+        }
+
+        try {
+            $result = $this->completeDyLink($payment, ['status' => $newStatus], $dyStatus);
+        } catch (\Throwable $e) {
+            Log::error('DY payment link ' . $newStatus . ': DY365 did not accept the notification; link left unchanged', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
+
+            return response()->json(['status' => 'error', 'message' => 'DY365 could not be notified. Please try again.'], 502);
+        }
+
+        if ($result === 'invalid_state') {
+            return response()->json(['status' => 'error', 'message' => 'This payment can no longer be changed.'], 409);
+        }
+
+        return $this->dyLinkResultView($payment->fresh(), $newStatus);
+    }
+
+    /**
+     * Moves an open link to its new status and tells DY365 — once. The row is locked, so a repeated or concurrent
+     * request cannot notify twice. If DY365 does not accept the notification nothing is changed (the transaction
+     * rolls back) and the same URL can simply be called again.
+     *
+     * @return string 'done' | 'already' | 'invalid_state'
+     * @throws \RuntimeException when DY365 did not accept the notification
+     */
+    private function completeDyLink(DyPaymentLink $payment, array $update, string $dyStatus): string
+    {
+        return DB::transaction(function () use ($payment, $update, $dyStatus) {
+            $locked = DyPaymentLink::whereKey($payment->id)->lockForUpdate()->first();
+
+            if ($locked->status === $update['status']) {
+                return 'already';
+            }
+
+            if (!in_array($locked->status, self::DY_OPEN_STATES, true)) {
+                return 'invalid_state';
+            }
+
+            if (!DyAcknowledgement::accepted($this->handlePaymentStatus($locked, $dyStatus))) {
+                throw new \RuntimeException("DY365 did not accept the {$dyStatus} notification");
+            }
+
+            $locked->update($update);
+
+            return 'done';
+        });
+    }
+
+    /** @return array{outcome: string, payment_id?: string, reason?: string} */
+    private function verifyDyTabbyLink(DyPaymentLink $payment, Request $request): array
+    {
+        // Tabby's payment id was stored when the link was created; the browser's copy is only compared with it.
+        $stored = (string) $payment->payment_id;
+        $given  = trim((string) $request->payment_id);
+
+        if ($stored !== '' && $given !== '' && !hash_equals($stored, $given)) {
+            return ['outcome' => 'mismatch', 'reason' => 'payment_id differs from the one created for this link'];
+        }
+
+        $id = $stored !== '' ? $stored : $given;
+
+        if ($id === '') {
+            return ['outcome' => 'mismatch', 'reason' => 'no payment id'];
+        }
+
+        $check = TabbyPaymentVerification::evaluate(
+            app(TabbyService::class)->retrieveTabbyPayment($id),
+            (string) $payment->dy_reference_id,
+            $payment->amount
+        );
+
+        return match ($check['verdict']) {
+            // AUTHORIZED counts as approved too: this flow has never captured here, and that is not changed.
+            TabbyPaymentVerification::PAID, TabbyPaymentVerification::NEEDS_CAPTURE => ['outcome' => 'approved', 'payment_id' => $id],
+            TabbyPaymentVerification::MISMATCH => ['outcome' => 'mismatch', 'reason' => $check['reason']],
+            TabbyPaymentVerification::REJECTED => ['outcome' => 'rejected'],
+            default                            => ['outcome' => 'pending'],
+        };
+    }
+
+    /** @return array{outcome: string, payment_id?: string, reason?: string} */
+    private function verifyDyTamaraLink(DyPaymentLink $payment, Request $request): array
+    {
+        // The Tamara order id was stored when the link was created; the browser's copy is only compared with it.
+        $stored = (string) $payment->payment_reference_id;
+        $given  = trim((string) $request->orderId);
+
+        if ($stored !== '' && $given !== '' && !hash_equals($stored, $given)) {
+            return ['outcome' => 'mismatch', 'reason' => 'orderId differs from the one created for this link'];
+        }
+
+        $orderId = $stored !== '' ? $stored : $given;
+
+        if ($orderId === '') {
+            return ['outcome' => 'mismatch', 'reason' => 'no order id'];
+        }
+
+        $tamara = app(TamaraService::class);
+        $read   = fn() => TamaraOrderVerification::evaluate($tamara->getOrderStatus($orderId), (string) $payment->dy_reference_id, $payment->amount);
+        $check  = $read();
+
+        switch ($check['verdict']) {
+            case TamaraOrderVerification::ERROR:
+                return ['outcome' => 'error', 'reason' => $check['reason']];
+            case TamaraOrderVerification::MISMATCH:
+                return ['outcome' => 'mismatch', 'reason' => $check['reason']];
+            case TamaraOrderVerification::REJECTED:
+                return ['outcome' => 'rejected'];
+            case TamaraOrderVerification::PENDING:
+                return ['outcome' => 'pending'];
+        }
+
+        if ($check['verdict'] === TamaraOrderVerification::NEEDS_AUTHORISE) {
+            $auth       = $tamara->authorizeOrder($orderId);
+            $authorised = is_array($auth) && empty($auth['error']) && in_array(strtolower((string) ($auth['status'] ?? '')), ['authorised', 'authorized'], true);
+
+            if (!$authorised) {
+                // e.g. the webhook authorised it a moment ago: trust Tamara's current word, not the failed call
+                $after = $read()['verdict'];
+
+                if (!in_array($after, [TamaraOrderVerification::AUTHORISED, TamaraOrderVerification::CAPTURED], true)) {
+                    return ['outcome' => 'error', 'reason' => 'Tamara did not authorise the order'];
+                }
+
+                $check['verdict'] = $after;
+            } else {
+                $check['verdict'] = TamaraOrderVerification::AUTHORISED;
+            }
+        }
+
+        if ($check['verdict'] === TamaraOrderVerification::AUTHORISED) {
+            // Best effort, exactly as before: its result has never gated the link, and it is not made to now.
+            $capture = $tamara->captureOrderDy((string) $payment->dy_reference_id, $orderId);
+
+            if (is_array($capture) && !empty($capture['error'])) {
+                Log::warning('DY Tamara capture reported an error', ['dy_reference_id' => $payment->dy_reference_id, 'error' => $capture['message'] ?? null]);
+            }
+        }
+
+        return ['outcome' => 'approved', 'payment_id' => $orderId];
+    }
+
+    /** Is this link's payment paid at the provider? 'paid' | 'not_paid' | 'unknown' (throws if the provider cannot be reached). */
+    private function providerStandingOfDyLink(DyPaymentLink $payment): string
+    {
+        if ($payment->payment_method === 'tabby') {
+            $id = (string) $payment->payment_id;
+
+            if ($id === '') {
+                return 'unknown';
+            }
+
+            $verdict = TabbyPaymentVerification::evaluate(app(TabbyService::class)->retrieveTabbyPayment($id), (string) $payment->dy_reference_id, $payment->amount)['verdict'];
+
+            return match ($verdict) {
+                TabbyPaymentVerification::PAID, TabbyPaymentVerification::NEEDS_CAPTURE => 'paid',
+                TabbyPaymentVerification::PENDING, TabbyPaymentVerification::REJECTED   => 'not_paid',
+                default                                                                  => 'unknown',
+            };
+        }
+
+        $id = (string) $payment->payment_reference_id;
+
+        if ($id === '') {
+            return 'unknown';
+        }
+
+        $verdict = TamaraOrderVerification::evaluate(app(TamaraService::class)->getOrderStatus($id), (string) $payment->dy_reference_id, $payment->amount)['verdict'];
+
+        return match ($verdict) {
+            TamaraOrderVerification::NEEDS_AUTHORISE, TamaraOrderVerification::AUTHORISED, TamaraOrderVerification::CAPTURED => 'paid',
+            TamaraOrderVerification::PENDING, TamaraOrderVerification::REJECTED                                              => 'not_paid',
+            default                                                                                                          => 'unknown',
+        };
+    }
+
+    private function dyLinkResultView(DyPaymentLink $payment, string $status)
+    {
+        $totalAmount     = (float) $payment->amount;   // includes 15% VAT
+        $priceWithoutTax = round($totalAmount / 1.15, 2);
+        $taxAmount       = round($totalAmount - $priceWithoutTax, 2);
+
+        return view('Payment.result', [
+            'status'          => $status,
+            'payment_type'    => $payment->payment_method,
+            'payment'         => $payment,
+            'priceWithoutTax' => $priceWithoutTax,
+            'taxAmount'       => $taxAmount,
+        ]);
     }
     //
     public function getPaymentStatus(Request $request)
