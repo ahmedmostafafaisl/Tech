@@ -34,6 +34,7 @@ use App\Services\Payment\DyPaymentLinkTransitions;
 use App\Services\Payment\TamaraDyLinkVerifier;
 use App\Services\Payment\TamaraOrderVerification;
 use App\Services\Payment\TabbyPaymentVerification;
+use App\Services\Sms\PhoneSmsRelayLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -128,9 +129,27 @@ class DyController extends Controller
     }
 
     // return payment links
+    /**
+     * Called directly by Dynamics — it cannot carry a shared secret, so this stays unauthenticated. Each entry in
+     * "payments" sends its own SMS to the request's phone number (see DyService::getPaymentLinks), so the whole
+     * batch is checked against that phone's limit BEFORE any checkout is created, not after.
+     */
     public function getPaymentLinks(DyCheckoutRequest $request)
     {
         $validated = $request->validated();
+        $limiter   = PhoneSmsRelayLimiter::paymentLink($validated['phone']);
+        $requested = count($validated['payments']);
+
+        if ($limiter->wouldExceed($requested)) {
+            return response()->json([
+                'status'        => false,
+                'paymentStatus' => (string) null,
+                'referenceId'   => (string) null,
+                'error'         => 'Too many payment links have been requested for this phone number recently. Please try again later.',
+            ], 429);
+        }
+
+        $limiter->hit($requested);
 
         return $this->dy_service->getPaymentLinks($validated);
     }
@@ -798,6 +817,11 @@ class DyController extends Controller
     }
 
     // send pdf link
+    /**
+     * Called directly by Dynamics — it cannot carry a shared secret, so this stays unauthenticated. Checked against
+     * the destination phone's limit before the file is even uploaded, so a phone already at its limit never causes
+     * an S3 upload (or a ShortLink) at all.
+     */
     public function sendInvoice(Request $request, $appointmentId)
     {
         $request->validate([
@@ -805,6 +829,15 @@ class DyController extends Controller
             'file' => 'required|file|mimes:pdf|max:20480',
             'book_id' => 'nullable|string',
         ]);
+
+        $smsLimiter = PhoneSmsRelayLimiter::invoice($request->phone);
+
+        if ($smsLimiter->wouldExceed()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Too many invoice messages have been sent to this phone number recently. Please try again later.',
+            ], 429);
+        }
 
         if (empty($appointmentId)) {
             return response()->json(['success' => false, 'message' => 'Appointment ID missing'], 400);
@@ -855,6 +888,7 @@ class DyController extends Controller
             $shortUrl = rtrim(config('app.url'), '/') . "/i/{$code}";
 
             // ✅ Send short link via SMS (instead of long S3 url)
+            $smsLimiter->hit();
             $smsResponse = $this->taqnyatSmsService->sendPdfLink($request->phone, $shortUrl);
 
             if (is_array($smsResponse) && isset($smsResponse['statusCode']) && (int) $smsResponse['statusCode'] === 201) {

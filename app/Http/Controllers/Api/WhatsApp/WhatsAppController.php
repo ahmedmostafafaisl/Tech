@@ -17,6 +17,7 @@ use App\Services\Lead\ScoringService;
 use App\Services\Telegram\TelegramService;
 use App\Services\WhatsApp\WhatsAppConfirmationService;
 use App\Services\WhatsApp\WhatsAppService;
+use App\Services\Sms\PhoneSmsRelayLimiter;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -156,7 +157,19 @@ class WhatsAppController extends Controller
 
         // ✅ Continue WhatsApp message sending even if notification failed
         // end notification
+
+        // Called directly by Dynamics — it cannot carry a shared secret, so this endpoint stays unauthenticated.
+        // The only protection against using it to message an arbitrary number is this phone-based limit.
+        $waLimiter = PhoneSmsRelayLimiter::whatsappNotify($data['phone']);
+
+        if ($waLimiter->wouldExceed()) {
+            return response()->json([
+                'error' => 'Too many WhatsApp messages have been sent to this phone number recently. Please try again later.',
+            ], 429);
+        }
+
         try {
+            $waLimiter->hit();
             $response = $whatsapp->sendTemplateMessage(
                 $data['phone'],
                 $data['template'],
@@ -224,9 +237,23 @@ class WhatsAppController extends Controller
 
         //send lead messages
         if (!empty($request->input('lead_message'))) {
+            // Called directly by Dynamics — it cannot carry a shared secret, so this endpoint stays unauthenticated.
+            // Shares one quota with the non-lead branch below: toggling lead_message must not grant a second quota
+            // for the same phone number. Checked BEFORE createLead(), not after: a blocked request must not create
+            // a lead record at all.
+            $waLimiter = PhoneSmsRelayLimiter::whatsappPreAppointment((string) $request->input('phone'));
+
+            if ($waLimiter->wouldExceed()) {
+                return response()->json([
+                    'message' => 'Too many WhatsApp messages have been sent to this phone number recently. Please try again later.',
+                    'error'   => 'rate_limited',
+                ], 429);
+            }
+
             $validated_data = ['customer_name' => $request->input('name'), 'mobile_number' => $request->input('phone'),  'product' => $request->input('items'), 'rec_id' => $request->input('rec_id')];
             $lead = $this->leadService->createLead($validated_data);
 
+            $waLimiter->hit();
             $q1 = $this->whatsAppService->sendQuestion1(
                 $lead->mobile_number,
                 $lead->order_number,
@@ -284,6 +311,17 @@ class WhatsAppController extends Controller
             ]);
         }
 
+        // Called directly by Dynamics — it cannot carry a shared secret, so this endpoint stays unauthenticated.
+        // Shares one quota with the lead_message branch above: the same phone number, either way in.
+        $waLimiter = PhoneSmsRelayLimiter::whatsappPreAppointment($data['phone']);
+
+        if ($waLimiter->wouldExceed()) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Too many WhatsApp messages have been sent to this phone number recently. Please try again later.',
+            ], 429);
+        }
+
         // ✅ 1. Save record before sending
         $message = PreAppointmentMessage::create($data);
 
@@ -301,6 +339,7 @@ class WhatsAppController extends Controller
         ];
 
         try {
+            $waLimiter->hit();
             $response = $whatsapp->sendTemplateMessage(
                 $data['phone'],
                 'pre_appointment_action_v3',
