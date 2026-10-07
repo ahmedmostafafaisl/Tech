@@ -497,6 +497,22 @@ class TabbyPaymentController extends Controller
         return null;
     }
 
+    private function tabbyResultView(DirectAppointmentPayment $payment, string $status)
+    {
+        $totalAmount     = (float) $payment->price;
+        $priceWithoutTax = round($totalAmount / 1.15, 2);
+        $taxAmount       = round($totalAmount - $priceWithoutTax, 2);
+
+        return view('Payment.result', [
+            'status'          => $status,
+            'payment_type'    => 'tabby',
+            'payment'         => $payment,
+            'phone'           => $payment->phone,
+            'priceWithoutTax' => $priceWithoutTax,
+            'taxAmount'       => $taxAmount,
+        ]);
+    }
+
     public function newCancel(Request $request)
     {
         $payment = DirectAppointmentPayment::where('reference_id', $request->reference_id)->first();
