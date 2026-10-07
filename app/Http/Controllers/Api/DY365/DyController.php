@@ -208,10 +208,10 @@ class DyController extends Controller
         try {
             $result = $this->completeDyLink($payment, ['status' => 'success', 'payment_id' => $verified['payment_id']], 'Approved');
         } catch (\Throwable $e) {
-            Log::error('DY payment link success: DY365 did not accept the notification; link left unchanged', [
-                'dy_reference_id' => $payment->dy_reference_id,
-                'error'           => $e->getMessage(),
-            ]);
+            // Log::error('DY payment link success: DY365 did not accept the notification; link left unchanged', [
+            //     'dy_reference_id' => $payment->dy_reference_id,
+            //     'error'           => $e->getMessage(),
+            // ]);
 
             return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
         }
@@ -311,10 +311,10 @@ class DyController extends Controller
         try {
             $result = $this->completeDyLink($payment, ['status' => $newStatus], $dyStatus);
         } catch (\Throwable $e) {
-            Log::error('DY payment link ' . $newStatus . ': DY365 did not accept the notification; link left unchanged', [
-                'dy_reference_id' => $payment->dy_reference_id,
-                'error'           => $e->getMessage(),
-            ]);
+            // Log::error('DY payment link ' . $newStatus . ': DY365 did not accept the notification; link left unchanged', [
+            //     'dy_reference_id' => $payment->dy_reference_id,
+            //     'error'           => $e->getMessage(),
+            // ]);
 
             return response()->json(['status' => 'error', 'message' => 'DY365 could not be notified. Please try again.'], 502);
         }

@@ -441,13 +441,13 @@ class ClickPayController extends Controller
                     // A non-null $reply here is DY365's own 200-OK business rejection (Status:false / Error set),
                     // not a transport failure (those are swallowed and logged separately, to
                     // storage/logs/dyservice/dyPaymentStatus.log) — until now, logged nowhere at all.
-                    Log::error('DY365 refused a payment-link status notification', [
-                        'dy_reference_id'      => $locked->dy_reference_id,
-                        'payment_reference_id' => $locked->payment_reference_id,
-                        'requested_status'     => 'Approved',
-                        'current_local_status' => $locked->status,
-                        'dy_reply'             => $reply,
-                    ]);
+                    // Log::error('DY365 refused a payment-link status notification', [
+                    //     'dy_reference_id'      => $locked->dy_reference_id,
+                    //     'payment_reference_id' => $locked->payment_reference_id,
+                    //     'requested_status'     => 'Approved',
+                    //     'current_local_status' => $locked->status,
+                    //     'dy_reply'             => $reply,
+                    // ]);
 
                     throw new \RuntimeException('DY365 did not accept the Approved notification');
                 }
@@ -455,10 +455,10 @@ class ClickPayController extends Controller
                 $locked->update(['status' => 'paid']);
             });
         } catch (\Throwable $e) {
-            Log::error('ClickPay DY return: DY365 did not accept the notification; link left unchanged', [
-                'dy_reference_id' => $payment->dy_reference_id,
-                'error'           => $e->getMessage(),
-            ]);
+            // Log::error('ClickPay DY return: DY365 did not accept the notification; link left unchanged', [
+            //     'dy_reference_id' => $payment->dy_reference_id,
+            //     'error'           => $e->getMessage(),
+            // ]);
 
             return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
         }

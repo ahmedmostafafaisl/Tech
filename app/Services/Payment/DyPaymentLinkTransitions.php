@@ -52,13 +52,13 @@ final class DyPaymentLinkTransitions
                 // separately, to storage/logs/dyservice/dyPaymentStatus.log); a non-null reply here is DY365's
                 // own 200-OK business rejection (Status:false / Error set), which until now was logged nowhere
                 // at all. Both cases are captured here, in the main log, every time.
-                Log::error('DY365 refused a payment-link status notification', [
-                    'dy_reference_id'      => $locked->dy_reference_id,
-                    'payment_reference_id' => $locked->payment_reference_id,
-                    'requested_status'     => $dyStatus,
-                    'current_local_status' => $locked->status,
-                    'dy_reply'             => $reply,
-                ]);
+                // Log::error('DY365 refused a payment-link status notification', [
+                //     'dy_reference_id'      => $locked->dy_reference_id,
+                //     'payment_reference_id' => $locked->payment_reference_id,
+                //     'requested_status'     => $dyStatus,
+                //     'current_local_status' => $locked->status,
+                //     'dy_reply'             => $reply,
+                // ]);
 
                 throw new \RuntimeException("DY365 did not accept the {$dyStatus} notification");
             }

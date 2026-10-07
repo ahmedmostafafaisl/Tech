@@ -31,8 +31,7 @@ final class TamaraWebhookProcessor
     public function __construct(
         private readonly TamaraDyLinkVerifier $verifier,
         private readonly DyPaymentLinkTransitions $transitions,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  string|null  $urlReference  the PAY-... reference in the old per-checkout URL (null on the stable endpoint)
@@ -151,7 +150,7 @@ final class TamaraWebhookProcessor
         try {
             $result = $this->transitions->complete($link, $update, $dyStatus);
         } catch (\Throwable $e) {
-            Log::error('Tamara webhook: DY365 did not accept the notification; link left unchanged', $context + ['error' => $e->getMessage()]);
+            // Log::error('Tamara webhook: DY365 did not accept the notification; link left unchanged', $context + ['error' => $e->getMessage()]);
 
             return [503, ['status' => 'error', 'message' => 'DY365 could not be notified. The notification can be retried.']];
         }
