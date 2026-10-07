@@ -324,113 +324,179 @@ class TabbyPaymentController extends Controller
 
     public function newSuccess(Request $request)
     {
-        $sales_order_id = $request->sales_order_id ?? null;
+        $referenceId    = trim((string) $request->reference_id);
+        $salesOrderId   = trim((string) $request->sales_order_id);
+        $tabbyPaymentId = trim((string) $request->payment_id);
 
-        $directAppointment = DirectAppointment::where('sales_order_id', $sales_order_id)
+        $verifyWithTabby = (bool) config('tabby.verify_success_return');
+
+        if ($referenceId === '' || $salesOrderId === '' || ($verifyWithTabby && $tabbyPaymentId === '')) {
+            return response()->json([
+                'status'  => false,
+                'message' => $verifyWithTabby
+                    ? 'reference_id, sales_order_id and payment_id are required.'
+                    : 'reference_id and sales_order_id are required.',
+            ], 422);
+        }
+
+        $directAppointment = DirectAppointment::where('sales_order_id', $salesOrderId)
             ->orderByDesc('id')
             ->first();
 
         if (!$directAppointment) {
-            return response()->json(['status' => false, 'message' => 'DirectAppointment not found']);
+            return response()->json(['status' => false, 'message' => 'DirectAppointment not found'], 404);
         }
 
-        $payment = DirectAppointmentPayment::where('reference_id', $request->reference_id)->first();
+        $payment = DirectAppointmentPayment::where('reference_id', $referenceId)->first();
 
         if (!$payment) {
-            return response()->json(['status' => false, 'message' => 'Payment not found']);
+            return response()->json(['status' => false, 'message' => 'Payment not found'], 404);
         }
 
-        $tabby = new TabbyService();
-
-        try {
-            // ✅ Update payment as paid (optimistic), then confirm from Tabby
-            $payment->update([
-                'status'     => 'paid',
-                'payment_id' => $request->payment_id,
+        // The payment must belong to the order named in the URL.
+        if ((string) $payment->sales_order_id !== $salesOrderId) {
+            Log::warning('Tabby success: payment does not belong to the given sales order', [
+                'reference_id'  => $referenceId,
+                'sales_order_id' => $salesOrderId,
             ]);
 
-            // Retrieve payment
-            $pay = $tabby->retrieveTabbyPayment($payment->payment_id);
+            return response()->json(['status' => false, 'message' => 'Payment does not belong to this sales order.'], 422);
+        }
 
-            // Capture if authorized
-            if (isset($pay['status']) && $pay['status'] === 'AUTHORIZED') {
-                $pay = $tabby->capturePaymentRequest(
-                    $request->payment_id,
-                    $payment->reference_id,
+        // A replay of an already-paid payment: nothing to verify and nothing to change.
+        if ($payment->status === 'paid') {
+            return $this->tabbyResultView($payment, 'paid');
+        }
+
+        // Only a pending payment (or one an earlier cancel/failure callback marked failed) can become paid.
+        if (!in_array($payment->status, ['pending', 'failed'], true)) {
+            return response()->json(['status' => false, 'message' => 'This payment can no longer be completed.'], 409);
+        }
+
+        if (config('tabby.verify_success_return')) {
+            // Verified mode: ask Tabby first, and stop here unless it confirmed the payment.
+            $stop = $this->verifyTabbyReturn($payment, $referenceId, $tabbyPaymentId);
+
+            if ($stop !== null) {
+                return $stop;
+            }
+        } else {
+            // Default: the return from Tabby marks the payment paid without asking Tabby. Capturing the payment is
+            // done by the Tabby webhook job (ProcessTabbyWebhook). That job never undoes a payment already marked
+            // paid: if Tabby disagrees it only logs "Attempted to mark already paid payment as failure.".
+            Log::notice('Tabby success: marked paid from the browser return without provider verification', [
+                'reference_id'   => $referenceId,
+                'sales_order_id' => $salesOrderId,
+                'payment_id'     => $tabbyPaymentId !== '' ? $tabbyPaymentId : null,
+                'ip'             => $request->ip(),
+            ]);
+        }
+
+        $outcome = DB::transaction(function () use ($payment, $directAppointment, $tabbyPaymentId) {
+            $locked = DirectAppointmentPayment::whereKey($payment->id)->lockForUpdate()->first();
+
+            if ($locked->status === 'paid') {
+                return 'already_paid';   // a concurrent or replayed request got here first
+            }
+
+            if (!in_array($locked->status, ['pending', 'failed'], true)) {
+                return 'invalid_state';
+            }
+
+            $locked->update(['status' => 'paid', 'payment_id' => $tabbyPaymentId !== '' ? $tabbyPaymentId : $locked->payment_id]);
+
+            $appointment = DirectAppointment::whereKey($directAppointment->id)->lockForUpdate()->first();
+            $appointment->collect = max(0, (float) $appointment->collect - (float) $locked->price);
+            $appointment->save();
+
+            $paidSum  = (float) $appointment->payments()->where('status', 'paid')->sum('price');
+            $discount = (float) ($appointment->discount ?? 0);
+            $required = (float) ($appointment->required_amount ?? 0);
+
+            if ($required > 0 && abs(($paidSum + $discount) - $required) < 0.01) {
+                $appointment->update(['status' => 'paid', 'collect' => 0]);
+            }
+
+            return 'paid';
+        });
+
+        if ($outcome === 'invalid_state') {
+            return response()->json(['status' => false, 'message' => 'This payment can no longer be completed.'], 409);
+        }
+
+        return $this->tabbyResultView($payment->fresh(), 'paid');
+    }
+
+    /**
+     * Verified mode only (config tabby.verify_success_return): asks Tabby whether this payment really happened
+     * (retrieve it, capture it if it is only authorised, read it back, compare reference and amount).
+     *
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Contracts\View\View|null  the response to send when the payment must
+     *         NOT be marked paid, or null when Tabby confirmed it
+     */
+    private function verifyTabbyReturn(DirectAppointmentPayment $payment, string $referenceId, string $tabbyPaymentId)
+    {
+        $tabby = app(TabbyService::class);
+
+        try {
+            $check = TabbyPaymentVerification::evaluate(
+                $tabby->retrieveTabbyPayment($tabbyPaymentId),
+                (string) $payment->reference_id,
+                $payment->price
+            );
+
+            if ($check['verdict'] === TabbyPaymentVerification::NEEDS_CAPTURE) {
+                $tabby->capturePaymentRequest($tabbyPaymentId, $payment->reference_id, $payment->price);
+
+                // Never trust the capture reply alone: read the payment back and check it again.
+                $check = TabbyPaymentVerification::evaluate(
+                    $tabby->retrieveTabbyPayment($tabbyPaymentId),
+                    (string) $payment->reference_id,
                     $payment->price
                 );
             }
-
-            // Mark as paid only when closed
-            if (isset($pay['status']) && $pay['status'] === 'CLOSED') {
-                $payment->update(['status' => 'paid']);
-
-                $directAppointment->collect = max(0, (float) $directAppointment->collect - (float) $payment->price);
-                $directAppointment->save();
-            } else {
-                // لو مش CLOSED ومش paid بالفعل، خليها failed
-                if ($payment->status !== 'paid') {
-                    $payment->update(['status' => 'failed']);
-                }
-            }
-
-            // ✅ Re-calc totals
-            $paidSum = (float) $directAppointment->payments()
-                ->where('status', 'paid')
-                ->sum('price');
-
-            $discount = (float) ($directAppointment->discount ?? 0);
-            $required = (float) ($directAppointment->required_amount ?? 0);
-
-            $allPaid = $required > 0 && abs(($paidSum + $discount) - $required) < 0.01;
-
-            if ($allPaid) {
-                // ✅ Use the latest appointment row for this sales order
-                $appointment = DirectAppointment::where('sales_order_id', $payment->sales_order_id)
-                    ->orderByDesc('id')
-                    ->first();
-
-                if ($appointment) {
-                    $appointment->update([
-                        'status'  => 'paid',
-                        'collect' => 0,
-                    ]);
-                }
-            }
-
-            // Tax breakdown
-            $totalAmount     = (float) $payment->price;
-            $priceWithoutTax = round($totalAmount / 1.15, 2);
-            $taxAmount       = round($totalAmount - $priceWithoutTax, 2);
-
-            return view('Payment.result', [
-                'status'          => $payment->status === 'paid' ? 'paid' : 'failed',
-                'payment_type'    => 'tabby',
-                'payment'         => $payment,
-                'phone'           => $payment->phone,
-                'priceWithoutTax' => $priceWithoutTax,
-                'taxAmount'       => $taxAmount,
-            ]);
         } catch (\Throwable $e) {
-            return response()->json(['status' => false, 'message' => $e->getMessage()]);
+            // Any retrieval / capture error leaves the payment exactly as it was. It must never become paid.
+            Log::error('Tabby success: provider verification failed; payment left unchanged', [
+                'reference_id' => $referenceId,
+                'error'        => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status'  => false,
+                'message' => 'The payment could not be verified with Tabby. Please try again.',
+            ], 502);
         }
+
+        if ($check['verdict'] === TabbyPaymentVerification::MISMATCH) {
+            Log::warning('Tabby success: provider payment does not match the local payment', [
+                'reference_id' => $referenceId,
+                'reason'       => $check['reason'],
+            ]);
+
+            return response()->json(['status' => false, 'message' => 'The Tabby payment does not match this payment.'], 422);
+        }
+
+        if ($check['verdict'] === TabbyPaymentVerification::REJECTED) {
+            DB::transaction(function () use ($payment) {
+                $locked = DirectAppointmentPayment::whereKey($payment->id)->lockForUpdate()->first();
+
+                if ($locked && $locked->status === 'pending') {
+                    $locked->update(['status' => 'failed']);
+                }
+            });
+
+            return $this->tabbyResultView($payment->fresh(), 'failed');
+        }
+
+        if ($check['verdict'] !== TabbyPaymentVerification::PAID) {
+            // Not completed (yet): show the failed page but do not touch the payment.
+            return $this->tabbyResultView($payment, 'failed');
+        }
+
+        return null;
     }
 
-    private function tabbyResultView(DirectAppointmentPayment $payment, string $status)
-    {
-        $totalAmount     = (float) $payment->price;
-        $priceWithoutTax = round($totalAmount / 1.15, 2);
-        $taxAmount       = round($totalAmount - $priceWithoutTax, 2);
-
-        return view('Payment.result', [
-            'status'          => $status,
-            'payment_type'    => 'tabby',
-            'payment'         => $payment,
-            'phone'           => $payment->phone,
-            'priceWithoutTax' => $priceWithoutTax,
-            'taxAmount'       => $taxAmount,
-        ]);
-    }
     public function newCancel(Request $request)
     {
         $payment = DirectAppointmentPayment::where('reference_id', $request->reference_id)->first();

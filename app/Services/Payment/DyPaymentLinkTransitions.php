@@ -31,15 +31,7 @@ final class DyPaymentLinkTransitions
         ]);
     }
 
-    /**
-     * Moves an open link to its new status and tells DY365 — once. The row is locked, so a repeated or concurrent
-     * request cannot notify twice. If DY365 does not accept the notification nothing is changed (the transaction
-     * rolls back) and the call can simply be repeated.
-     *
-     * @return string 'done' | 'already' | 'invalid_state'
-     *
-     * @throws \RuntimeException when DY365 did not accept the notification
-     */
+
     public function complete(DyPaymentLink $link, array $update, string $dyStatus): string
     {
         return DB::transaction(function () use ($link, $update, $dyStatus) {

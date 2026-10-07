@@ -39,15 +39,15 @@ return [
     ],
 
     'tabby' => [
-        'secret_key'    => env('TABBY_SECRET_KEY', 'sk_01965838-358e-3ca0-7761-95ae2c06bfa6'),
-        'public_key'    => env('TABBY_PUBLIC_KEY', 'pk_01965838-358e-3ca0-7761-95ad3c0d243d'),
+        'secret_key'    => env('TABBY_SECRET_KEY'),      // no default: a missing key must fail loudly, never silently fall back to a stale one
+        'public_key'    => env('TABBY_PUBLIC_KEY'),       // no default, same reason
         'merchant_code' => env('TABBY_MERCHANT_CODE', 'Naqiappsau'),
         'base_url'      => env('TABBY_BASE_URL', 'https://api.tabby.ai/api/v2/'),
 
 
         'webhook' => [
             'header' => env('TABBY_WEBHOOK_HEADER', 'X-Tabby-Webhook-Secret'),
-            'secret' => env('TABBY_WEBHOOK_SECRET', 'vrGvAmrH1lwte58RIyfLPqfBqRbDA6gR4L2ScNMsyN57szLf'),
+            'secret' => env('TABBY_WEBHOOK_SECRET'),          // no default: this exact value was committed to source control and must be rotated with Tabby, not reused
         ],
     ],
 
