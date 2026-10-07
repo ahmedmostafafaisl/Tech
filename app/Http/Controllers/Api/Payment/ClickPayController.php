@@ -418,7 +418,8 @@ class ClickPayController extends Controller
         $currency = $data['cart_currency'] ?? null;
 
         if (($charged !== null && (!is_numeric($charged) || abs((float) $charged - (float) $payment->amount) >= 0.005))
-            || ($currency !== null && strtoupper((string) $currency) !== 'SAR')) {
+            || ($currency !== null && strtoupper((string) $currency) !== 'SAR')
+        ) {
             Log::warning('ClickPay DY return: authorised payment does not match the link amount/currency; link left unchanged', [
                 'dy_reference_id' => $payment->dy_reference_id,
             ]);
@@ -434,7 +435,20 @@ class ClickPayController extends Controller
                     return;   // a concurrent or repeated request got here first
                 }
 
-                if (!DyAcknowledgement::accepted(app(DyController::class)->handlePaymentStatus($locked, 'Approved'))) {
+                $reply = app(DyController::class)->handlePaymentStatus($locked, 'Approved');
+
+                if (!DyAcknowledgement::accepted($reply)) {
+                    // A non-null $reply here is DY365's own 200-OK business rejection (Status:false / Error set),
+                    // not a transport failure (those are swallowed and logged separately, to
+                    // storage/logs/dyservice/dyPaymentStatus.log) — until now, logged nowhere at all.
+                    Log::error('DY365 refused a payment-link status notification', [
+                        'dy_reference_id'      => $locked->dy_reference_id,
+                        'payment_reference_id' => $locked->payment_reference_id,
+                        'requested_status'     => 'Approved',
+                        'current_local_status' => $locked->status,
+                        'dy_reply'             => $reply,
+                    ]);
+
                     throw new \RuntimeException('DY365 did not accept the Approved notification');
                 }
 
