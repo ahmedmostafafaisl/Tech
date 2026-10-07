@@ -33,7 +33,7 @@ return [
 
     'clickpay' => [
         'base_url'     => env('CLICKPAY_BASE_URL', 'https://secure.clickpay.com.sa'),
-        'server_key'   => env('CLICKPAY_SERVER_KEY', 'SBJNL9NZ2R-J6NZLTJKDZ-GZGJTKTLMG'),
+        'server_key'   => env('CLICKPAY_SERVER_KEY'),     // no default: this exact value was committed to source control and must be rotated with ClickPay
         'profile_id'   => env('CLICKPAY_PROFILE_ID', 43354),
         'public_url'   => env('CLICKPAY_PUBLIC_URL', 'https://prod-api.naqi.sa'),
     ],
@@ -53,7 +53,7 @@ return [
 
     'tamara' => [
         'api_url' => env('TAMARA_API_URL', 'https://api.tamara.co/'),
-        'api_key' => env('TAMARA_API_KEY', 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhY2NvdW50SWQiOiI0YTE0MTRmNi00YzIxLTRjYTEtYWQ5Ny1hNjI0YzJlYTc4MGYiLCJ0eXBlIjoibWVyY2hhbnQiLCJzYWx0IjoiY2Q4ODJkMGJlYWNlZGQ5NjJhZTBkODA0YjJmNDY1ZDkiLCJpYXQiOjE2Nzc2NDI5OTIsImlzcyI6IlRhbWFyYSBQUCJ9.nDy-pqpIx8Cc9iUaK9tzu89-JRdQJDRcWF7nXAaHfwRj8VNK2zHh07Rba0VGdVCczYBQq4PzAju05X-yDef-uUGvFgI9pLNpauItON4ci51qtIllRP5Pntv0lMXDZXngkvtT8wXRWOxiIwRav-7k4PQnKSQyCImCkUhBWQ5i_f8UnLa2BwXJvsCPRBJjd2d2fP4PHcUh3i7KOoEJoTlLfUG7MjW4GGdPY4lTZB9RHLXYY4f1G02aGMWuhzItksLlch5yMg2tdvQoFPTw7BtZZ1f5s81ESQydE-Yw71Q4sE15mU22KBOdczfP1rQ-9Gf70TFAmbzma7JU7SDr3hxMxQ'),
+        'api_key' => env('TAMARA_API_KEY'),   // no default: this exact value was committed to source control and must be rotated with Tamara
         // OPTIONAL. If set, a Tamara JWT signed with this key counts as an authenticated notification. Webhook
         // processing never depends on it: Tamara's API is always asked before a payment is changed.
         'notification_token' => env('TAMARA_NOTIFICATION_TOKEN'),
@@ -79,12 +79,12 @@ return [
     ],
 
     'dy365' => [
-        'client_id'     => env('DY_CLIENT_ID', '71b8304b-aed3-4cc8-975f-52dc7fde65c7'),
-        'client_secret' => env('DY_CLIENT_SECRET', 'UX08Q~v2TnzlyWVTj-UQzGU4d4O4Xz9ROaUFeb8N'),
+        'client_id'     => env('DY_CLIENT_ID'),       // no default: committed to source control, rotate with DY365
+        'client_secret' => env('DY_CLIENT_SECRET'),   // no default, same reason
     ],
 
     'taqnyat' => [
-        'api_key'      => env('TAQNYAT_SMS_API_KEY', '1dc224c44e3a2950d88cdaafa9dbc9e3'),
+        'api_key'      => env('TAQNYAT_SMS_API_KEY'),     // no default: this exact value was committed to source control and must be rotated with Taqnyat
         'sender_tech'  => env('TAQNYAT_SMS_SENDER_TECH', 'Naqi-Tech'),
         'sender_care'  => env('TAQNYAT_SMS_SENDER_CARE', 'Naqi-Care'),
     ],
@@ -100,8 +100,8 @@ return [
     ],
 
     'powerbi' => [
-        'username' => env('POWERBI_USERNAME', 'bi@admin.com'),
-        'password' => env('POWERBI_PASSWORD', 'bi@@admin@@'),
+        'username' => env('POWERBI_USERNAME'),   // no default: this exact value (and a weak password) was committed to source control
+        'password' => env('POWERBI_PASSWORD'),   // no default, same reason
     ],
 
     'fcm' => [
@@ -115,8 +115,10 @@ return [
 
     'telegram' => [
 
-        'bot_token' => '8506550704:AAHYtIX343DpYpAUvCJEPaszC0mjusu0BuI',
-        'chat_id' => '-1004380688068',
+        // Previously hardcoded directly here (not even via env()): that exact bot token is committed to
+        // source control and must be revoked/regenerated with @BotFather.
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id'   => env('TELEGRAM_CHAT_ID'),
     ],
 
 ];
