@@ -2,26 +2,27 @@
 
 namespace App\Repositories\User;
 
-use App\Models\Task;
-use App\Models\User;
-use App\Models\Appointment;
-use Illuminate\Support\Arr;
-use App\Models\PinResetRequest;
 use App\Helper\ApiResponseHelper;
-use Spatie\Permission\Models\Role;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
-use App\Models\Setting;
-use App\Services\Auth\AuthAttemptLimiter;
-use App\Services\Logs\UserLogService;
-use App\Http\Resources\User\UserResource;
-use App\Http\Resources\User\SingleUserTasks;
 use App\Http\Resources\User\AllTechsResource;
 use App\Http\Resources\User\EmployeeResource;
 use App\Http\Resources\User\SingleEmployeeResource;
 use App\Http\Resources\User\SingleUserAppointments;
+use App\Http\Resources\User\SingleUserTasks;
+use App\Http\Resources\User\UserResource;
+use App\Models\Appointment;
+use App\Models\PinResetRequest;
+use App\Models\Setting;
+use App\Models\Task;
+use App\Models\User;
 use App\Repositories\Interfaces\UserRepositoryInterface;
+use App\Services\Auth\AuthAttemptLimiter;
+use App\Services\Auth\DefaultOtp;
+use App\Services\Logs\UserLogService;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Spatie\Permission\Models\Role;
 
 class UserRepository implements UserRepositoryInterface
 {
@@ -32,7 +33,9 @@ class UserRepository implements UserRepositoryInterface
 
     /** After a correct OTP the PIN step may rely on that proof for this long. */
     private const OTP_PROOF_MINUTES = 10;
-    protected  $userLogService;
+
+    protected $userLogService;
+
     public function __construct(UserLogService $userLogService)
     {
         $this->userLogService = $userLogService;
@@ -41,13 +44,15 @@ class UserRepository implements UserRepositoryInterface
     public function index()
     {
         $users = User::all();
+
         return $this->setCode(code: 200)->setData(UserResource::collection($users))->setMessage('Success.')->send();
     }
+
     public function allEmployees($perPage, $page, $role = null, $status = null)
     {
         $authUser = Auth::user();
 
-        if (!$authUser->can('view employees')) {
+        if (! $authUser->can('view employees')) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to view this appointment.')
@@ -78,11 +83,12 @@ class UserRepository implements UserRepositoryInterface
             ->setMessage('success')
             ->send();
     }
+
     public function allTechs($search, $page, $status = null)
     {
         $authUser = Auth::user();
 
-        if (!$authUser->can('view technicians')) {
+        if (! $authUser->can('view technicians')) {
             return $this->setCode(401)
                 ->setData([])
                 ->setMessage('You are not authorized to view technicians.')
@@ -97,7 +103,7 @@ class UserRepository implements UserRepositoryInterface
             })->select('id', 'username', 'email', 'phone', 'type', 'status', 'created_at', 'updated_at');
 
         // If search provided, apply filters
-        if (!empty($search)) {
+        if (! empty($search)) {
             $query->where(function ($q) use ($search) {
                 if (is_numeric($search) && strlen($search) >= 7) {
                     $q->where('phone', 'like', "%$search%");
@@ -127,7 +133,7 @@ class UserRepository implements UserRepositoryInterface
     {
         $authUser = Auth::user();
 
-        if (!$authUser->can('view customers')) {
+        if (! $authUser->can('view customers')) {
             return $this->setCode(401)
                 ->setData([])
                 ->setMessage('You are not authorized to view customers.')
@@ -137,7 +143,7 @@ class UserRepository implements UserRepositoryInterface
         $query = User::where('type', 'customer');
 
         // If search provided, apply filters
-        if (!empty($search)) {
+        if (! empty($search)) {
             $query->where(function ($q) use ($search) {
                 if (is_numeric($search) && strlen($search) >= 7) {
                     $q->where('phone', 'like', "%$search%");
@@ -164,13 +170,11 @@ class UserRepository implements UserRepositoryInterface
             ->send();
     }
 
-
     public function find($id)
     {
         $authUser = Auth::user();
 
-
-        if (!$authUser->hasAnyPermission(['view employees', 'view technicians', 'view customers'])) {
+        if (! $authUser->hasAnyPermission(['view employees', 'view technicians', 'view customers'])) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to view this appointment.')
@@ -178,20 +182,22 @@ class UserRepository implements UserRepositoryInterface
         }
         $user = User::where('id', $id)->with([
             'technicianAppointments.items',
-            'tasks'
+            'tasks',
         ])->first();
-        if (!$user) {
+        if (! $user) {
             return $this->setCode(code: 404)
                 ->setData([])
                 ->setMessage('User not found.')
                 ->send();
         }
+
         return $this->setCode(code: 200)->setData(new SingleEmployeeResource($user))->setMessage('Success.')->send();
     }
+
     public function store(array $data)
     {
         $authUser = Auth::user();
-        if (!$authUser->hasAnyPermission(['create employees', 'create technicians', 'create customers'])) {
+        if (! $authUser->hasAnyPermission(['create employees', 'create technicians', 'create customers'])) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to create this User.')
@@ -208,7 +214,7 @@ class UserRepository implements UserRepositoryInterface
 
         if (isset($data['image'])) {
             $image = $data['image'];
-            $fileName = uniqid() . '.' . $image->getClientOriginalExtension();
+            $fileName = uniqid().'.'.$image->getClientOriginalExtension();
             $path = 'User/images';
             $data['image'] = $image->storeAs($path, $fileName, 's3');
         }
@@ -221,7 +227,7 @@ class UserRepository implements UserRepositoryInterface
         if (isset($data['role'])) {
             $role = Role::where('name', $data['role'])->first();
 
-            if (!$role) {
+            if (! $role) {
                 return $this->setCode(422)->setData([])->setMessage('Role not found.')->send();
             }
 
@@ -244,14 +250,14 @@ class UserRepository implements UserRepositoryInterface
             ],
         );
 
-        return $this->setCode(200)->setData(["user" => new UserResource($user), "token" => $token])->setMessage('You are successfully Registered.')->send();
+        return $this->setCode(200)->setData(['user' => new UserResource($user), 'token' => $token])->setMessage('You are successfully Registered.')->send();
     }
 
     public function update(array $data, $user)
     {
         $authUser = Auth::user();
         // return $authUser->permissions;
-        if (!$authUser->hasAnyPermission(['update employees', 'update technicians', 'update customers'])) {
+        if (! $authUser->hasAnyPermission(['update employees', 'update technicians', 'update customers'])) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to Update this User.')
@@ -267,7 +273,7 @@ class UserRepository implements UserRepositoryInterface
 
         if (isset($data['image'])) {
             $image = $data['image'];
-            $fileName = uniqid() . '.' . $image->getClientOriginalExtension();
+            $fileName = uniqid().'.'.$image->getClientOriginalExtension();
             $rut = 'User/images';
             $image_path = $image->storeAs($rut, $fileName, 's3');
             $data['image'] = $image_path;
@@ -296,7 +302,8 @@ class UserRepository implements UserRepositoryInterface
                 'updated_fields' => array_keys($data),
             ],
         );
-        return  $this->setCode(200)->setData(new EmployeeResource($user))->setMessage('You are successfully update Profile.')->send();
+
+        return $this->setCode(200)->setData(new EmployeeResource($user))->setMessage('You are successfully update Profile.')->send();
     }
 
     public function findByPhone($phone)
@@ -310,8 +317,8 @@ class UserRepository implements UserRepositoryInterface
         $otp = random_int(1000, 9999);
 
         $user->forceFill([
-            'otp'                => (string) $otp,
-            'otp_expires_at'     => now()->addMinutes(self::OTP_TTL_MINUTES),
+            'otp' => (string) $otp,
+            'otp_expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES),
             'otp_verified_until' => null,
         ])->save();
 
@@ -325,8 +332,8 @@ class UserRepository implements UserRepositoryInterface
     public function issueDefaultOtp(User $user, string $code): void
     {
         $user->forceFill([
-            'otp'                => $code,
-            'otp_expires_at'     => now()->addMinutes(self::OTP_TTL_MINUTES),
+            'otp' => $code,
+            'otp_expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES),
             'otp_verified_until' => null,
         ])->save();
     }
@@ -346,9 +353,11 @@ class UserRepository implements UserRepositoryInterface
             return $this->tooManyAttempts();
         }
 
-        // No bypass codes, no bypass phone numbers: only the code issued by sendOtp(),
-        // while it is unexpired, and only once.
-        if (! $this->otpMatches($user, $otp)) {
+        // The code issued by sendOtp(), while unexpired and only once — OR, for a phone on the default-OTP
+        // allowlist while the feature is on, the configured default code directly. The second path does not
+        // require sendOtp() to have been called first, and does not expire: it is a deliberate convenience for
+        // the explicitly allowlisted test / app-review accounts (see DefaultOtp), not a general bypass.
+        if (! $this->otpMatches($user, $otp) && ! $this->defaultOtpMatches($user, $otp)) {
             $limiter->hit();
 
             return $this->setCode(401)->setData([])->setMessage('Invalid OTP')->send();
@@ -356,8 +365,8 @@ class UserRepository implements UserRepositoryInterface
 
         // Single use: burn the code and leave a short-lived server-side proof for the PIN step.
         $user->forceFill([
-            'otp'                => null,
-            'otp_expires_at'     => null,
+            'otp' => null,
+            'otp_expires_at' => null,
             'otp_verified_until' => now()->addMinutes(self::OTP_PROOF_MINUTES),
         ])->save();
 
@@ -410,16 +419,29 @@ class UserRepository implements UserRepositoryInterface
 
         return $this->setCode(200)
             ->setData([
-                "user" => new UserResource($user),
-                "token" => $token
+                'user' => new UserResource($user),
+                'token' => $token,
             ])
             ->setMessage('You are successfully logged in.')
             ->send();
     }
 
+    /**
+     * True when the given code is the default OTP currently configured for this phone (switch on, phone on the
+     * allowlist — see DefaultOtp::codeFor()), independent of whatever is stored in otp / otp_expires_at. This lets an
+     * allowlisted account verify with the default code even if sendOtp() was never called, or its result expired.
+     */
+    private function defaultOtpMatches(User $user, mixed $otp): bool
+    {
+        $given = is_scalar($otp) ? trim((string) $otp) : '';
+        $code = DefaultOtp::codeFor($user->phone);
+
+        return $given !== '' && $code !== null && hash_equals($code, $given);
+    }
+
     private function otpMatches(User $user, mixed $otp): bool
     {
-        $given  = is_scalar($otp) ? trim((string) $otp) : '';
+        $given = is_scalar($otp) ? trim((string) $otp) : '';
         $stored = (string) ($user->otp ?? '');
 
         // An empty/missing OTP on either side must never compare equal to the other.
@@ -461,19 +483,21 @@ class UserRepository implements UserRepositoryInterface
     }
 
     //  admin
-    public function updatePinCode(User $user,  $oldPin, $newPinCode)
+    public function updatePinCode(User $user, $oldPin, $newPinCode)
     {
         // Check current pin before updating (optional, based on how you store it)
-        if (!Hash::check($oldPin, $user->pin_code)) {
-            return  $this->setCode(422)->setData([])->setMessage('The current PIN code is incorrect.')->send();
+        if (! Hash::check($oldPin, $user->pin_code)) {
+            return $this->setCode(422)->setData([])->setMessage('The current PIN code is incorrect.')->send();
         }
         // dd($user,  $oldPin, $newPinCode);
         // Update the pin code (make sure it's hashed)
         $user->pin_code = bcrypt($newPinCode);
 
         $user->save();
-        return  $this->setCode(200)->setData([])->setMessage('PIN code updated successfully.')->send();
+
+        return $this->setCode(200)->setData([])->setMessage('PIN code updated successfully.')->send();
     }
+
     public function register(array $data)
     {
 
@@ -483,7 +507,7 @@ class UserRepository implements UserRepositoryInterface
         }
         if (isset($data['image'])) {
             $image = $data['image'];
-            $fileName = uniqid() . '.' . $image->getClientOriginalExtension();
+            $fileName = uniqid().'.'.$image->getClientOriginalExtension();
             $rut = 'User/images';
             $image_path = $image->storeAs($rut, $fileName, 'public');
             $data['image'] = $image_path;
@@ -491,30 +515,33 @@ class UserRepository implements UserRepositoryInterface
 
         $user = User::create($data);
         $token = $user->createToken('auth_token')->plainTextToken;
-        return  $this->setCode(200)->setData(["user" => new UserResource($user), "token" =>  $token])->setMessage('You are successfully Registered.')->send();
+
+        return $this->setCode(200)->setData(['user' => new UserResource($user), 'token' => $token])->setMessage('You are successfully Registered.')->send();
     }
+
     public function login(array $credentials)
     {
         $user = User::where('email', $credentials['email'])->first();
-        if (!$user) {
-            return  $this->setCode(401)->setData([])->setMessage('Invalid credentials')->send();
+        if (! $user) {
+            return $this->setCode(401)->setData([])->setMessage('Invalid credentials')->send();
         }
 
-        if ($user->status != "active") {
-            return  $this->setCode(401)->setData([])->setMessage('your Account deactivated')->send();
+        if ($user->status != 'active') {
+            return $this->setCode(401)->setData([])->setMessage('your Account deactivated')->send();
         }
-        if (!$user ||  !Hash::check($credentials['password'], $user->password)) {
-            return  $this->setCode(401)->setData([])->setMessage('Invalid credentials')->send();
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            return $this->setCode(401)->setData([])->setMessage('Invalid credentials')->send();
         }
         $token = $user->createToken('auth_token')->plainTextToken;
-        return  $this->setCode(200)->setData(["user" => new UserResource($user), "token" =>  $token])->setMessage('You are successfully logged in.')->send();
+
+        return $this->setCode(200)->setData(['user' => new UserResource($user), 'token' => $token])->setMessage('You are successfully logged in.')->send();
     }
 
     public function updateUserStatus($status, $user)
     {
         $authUser = Auth::user();
 
-        if (!$authUser->hasAnyPermission(['update employees', 'update technicians', 'update customers'])) {
+        if (! $authUser->hasAnyPermission(['update employees', 'update technicians', 'update customers'])) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to Update this User.')
@@ -522,7 +549,7 @@ class UserRepository implements UserRepositoryInterface
         }
 
         if (isset($status)) {
-            $user->status  = $status;
+            $user->status = $status;
             $user->save();
         }
 
@@ -537,7 +564,7 @@ class UserRepository implements UserRepositoryInterface
             ],
         );
 
-        return  $this->setCode(200)->setData(new EmployeeResource($user))->setMessage('You are successfully update Profile.')->send();
+        return $this->setCode(200)->setData(new EmployeeResource($user))->setMessage('You are successfully update Profile.')->send();
     }
 
     // Request pin reset
@@ -562,22 +589,21 @@ class UserRepository implements UserRepositoryInterface
         return $user;
     }
 
-
     // Single User Appointments
     public function singleUserAppointments($id, $perPage, $page)
     {
         $authUser = Auth::user();
 
-        if (!$authUser->can('view appointments')) {
+        if (! $authUser->can('view appointments')) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to view this appointment.')
                 ->send();
         }
 
-        if ($authUser->type = "tech") {
+        if ($authUser->type = 'tech') {
             $column = 'technician_id';
-        } elseif ($authUser->type = "customer") {
+        } elseif ($authUser->type = 'customer') {
             $column = 'customer_id';
         } else {
             return $this->setCode(code: 401)
@@ -587,7 +613,6 @@ class UserRepository implements UserRepositoryInterface
         }
 
         $query = Appointment::where($column, $id);
-
 
         // Paginate the results
         $appointments = $query->paginate($perPage, ['*'], 'page', $page);
@@ -605,19 +630,20 @@ class UserRepository implements UserRepositoryInterface
             ->setMessage('success')
             ->send();
     }
+
     // Single User Tasks
     public function singleUserTasks($id, $perPage, $page)
     {
         $authUser = Auth::user();
 
         $user = User::where('id', $id)->first();
-        if (!$user || $user->type != 'tech') {
+        if (! $user || $user->type != 'tech') {
             return $this->setCode(code: 404)
                 ->setData([])
                 ->setMessage('User not found.')
                 ->send();
         }
-        if (!$authUser->can('view tasks')) {
+        if (! $authUser->can('view tasks')) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to view this Tasks.')
