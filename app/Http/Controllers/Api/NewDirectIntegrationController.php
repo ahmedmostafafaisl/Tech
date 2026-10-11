@@ -858,6 +858,14 @@ class NewDirectIntegrationController extends Controller
             )
             ->get();
 
+        // Only serials this appointment's own dy_body actually reports as sent to DY365 are suppressed.
+        // A product can be added with one serial, removed, and re-added with another — only the last one
+        // is ever transmitted, but nothing guarantees appointment_transaction_serials gets cleaned up when
+        // that happens, so a stale row for the abandoned serial can otherwise block it forever.
+        $dyBody = DirectAppointment::where('book_id', $bookId)->latest('id')->value('dy_body');
+        $transmitted = \App\Services\Serials\TransmittedSerials::extract($dyBody);
+        $rows = \App\Services\Serials\TransmittedSerials::filter($rows, $transmitted);
+
         return \App\Services\Serials\UsedSerialWindow::groupAll($rows);
     }
 
