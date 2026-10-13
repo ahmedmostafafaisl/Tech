@@ -17,7 +17,6 @@ class ChangeRequestController extends Controller
     public function upsert(UpsertChangeRequestRequest $request)
     {
         $validated = $request->validated();
-
         $changeRequest = ChangeRequest::updateOrCreate(
             [
                 'book_id'        => $validated['book_id'],

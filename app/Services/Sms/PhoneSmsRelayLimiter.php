@@ -17,23 +17,23 @@ final class PhoneSmsRelayLimiter
 
     public static function paymentLink(string $phone): self
     {
-        return self::make('payment-link', $phone, 'sms_relay_payment_link_max_per_window', 'sms_relay_payment_link_window_minutes', 5, 60);
+        return self::make('payment-link', $phone, 'sms_relay_payment_link_max_per_window', 'sms_relay_payment_link_window_minutes', 10, 30);
     }
 
     public static function invoice(string $phone): self
     {
-        return self::make('invoice', $phone, 'sms_relay_invoice_max_per_window', 'sms_relay_invoice_window_minutes', 5, 60);
+        return self::make('invoice', $phone, 'sms_relay_invoice_max_per_window', 'sms_relay_invoice_window_minutes', 10, 30);
     }
 
     public static function whatsappNotify(string $phone): self
     {
-        return self::make('whatsapp-notify', $phone, 'whatsapp_relay_notify_max_per_window', 'whatsapp_relay_notify_window_minutes', 5, 60);
+        return self::make('whatsapp-notify', $phone, 'whatsapp_relay_notify_max_per_window', 'whatsapp_relay_notify_window_minutes', 10, 30);
     }
 
     /** Covers BOTH branches of sendPreAppointmentMessage (the normal flow and the lead_message flow): one phone, one quota. */
     public static function whatsappPreAppointment(string $phone): self
     {
-        return self::make('whatsapp-pre-appointment', $phone, 'whatsapp_relay_pre_appointment_max_per_window', 'whatsapp_relay_pre_appointment_window_minutes', 5, 60);
+        return self::make('whatsapp-pre-appointment', $phone, 'whatsapp_relay_pre_appointment_max_per_window', 'whatsapp_relay_pre_appointment_window_minutes', 10, 30);
     }
 
     private static function make(string $purpose, string $phone, string $maxSettingKey, string $windowSettingKey, int $defaultMax, int $defaultWindowMinutes): self

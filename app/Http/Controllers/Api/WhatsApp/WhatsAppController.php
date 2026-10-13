@@ -48,7 +48,7 @@ class WhatsAppController extends Controller
         $data = $request->validated();
 
         if ($data['notify_type'] === 'create') {
-            if (str_contains($data['type'] ?? '', 'طارئة')) {
+            if (str_contains($data['type'] ?? '', 'طارئة') || str_contains($data['type'] ?? '', 'دورية') || str_contains($data['type'] ?? '', 'خدمات') || str_contains($data['type'] ?? '', 'صيانة')) {
                 $data['template'] = 'new_appointment_emergency_1';
                 $parameters = [
                     ["type" => "text", "text" => $data['name']],

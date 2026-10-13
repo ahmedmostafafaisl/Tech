@@ -21,11 +21,14 @@ final class DirectPaymentGateways
 
     public const CLICKPAY = 'clickpay';
 
+    public const NEARPAY = 'nearpay';
+
     /** @var array<string, array<int, string>> canonical stored label first */
     private const STORED_AS = [
         self::TABBY    => ['TABI', 'TABBY'],
         self::TAMARA   => ['TAMARA'],
         self::CLICKPAY => ['E-Commerce', 'E-COMMERCE', 'ECOMMERCE', 'CLICKPAY'],
+        self::NEARPAY  => ['NEARPAY'],
     ];
 
     /** @return array<int, string> */

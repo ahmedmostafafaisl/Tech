@@ -680,6 +680,18 @@ Route::get('/integration/tabby/failure/reference_id={reference_id}/sales_order_i
 // tabby webhook
 Route::post('/webhooks/tabby', [TabbyWebhookController::class, 'handle'])
     ->name('tabby.webhook');
+
+// NearPay webhook — no signature is documented for this endpoint (see NearPayWebhookController), so it is
+// necessarily unauthenticated; rate limiting is the one defence-in-depth measure available here, generous
+// enough not to interfere with legitimate retries.
+Route::post('/webhooks/nearpay', [\App\Http\Controllers\Api\Payment\NearPayWebhookController::class, 'handle'])
+    ->middleware('throttle:60,1')
+    ->name('nearpay.webhook');
+
+Route::middleware('auth:sanctum')->prefix('payments/nearpay')->group(function () {
+    Route::post('/create', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'create']);
+    Route::post('/confirm', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'confirm']);
+});
 // GET /integration/tabby/sync-payment-status?payment_id=...
 Route::get('integration/tabby/sync-payment-status', [TabbyPaymentController::class, 'syncPaymentStatus']);
 // sync tamara payment
@@ -1012,7 +1024,7 @@ Route::middleware('auth:sanctum')->prefix('settings')->group(function () {
 Route::middleware('auth:sanctum')->get('/admin/system/config-health', [SystemHealthController::class, 'configHealth']);
 
 // Create-or-update a ChangeRequest for an appointment (matched by book_id + sales_order_id)
-Route::post('/change-requests/upsert', [ChangeRequestController::class, 'upsert']);
+Route::middleware('dy.auth')->post('/change-requests/upsert', [ChangeRequestController::class, 'upsert']);
 
 Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('/specific/book_id/serial/{bookId}', [NewDirectIntegrationController::class, 'deleteAppointmentTransactionSerials']);
 
@@ -1021,6 +1033,10 @@ Route::middleware('auth:sanctum')->post('/integration/appointment-transaction-se
 
 // Delete a serial if its owning appointment (checked live via DY365) is not found or not Completed
 Route::middleware('auth:sanctum')->post('/integration/appointment-transaction-serials/cleanup', [NewDirectIntegrationController::class, 'deleteAppointmentTransactionSerial']);
+
+// Is this (serial, item_number) still available for this technician, or already tied up on one of
+// their own Completed/Scheduled appointments and confirmed sent to DY365?
+Route::middleware('auth:sanctum')->post('/integration/appointment-transaction-serials/check', [NewDirectIntegrationController::class, 'checkSerialAvailability']);
 
 // Technicians whose primary main warehouse matches the given MainWarehouseId
 Route::middleware('auth:sanctum')->get('/integration/technicians/by-primary-warehouse', [NewDirectIntegrationController::class, 'techniciansByPrimaryWarehouse']);

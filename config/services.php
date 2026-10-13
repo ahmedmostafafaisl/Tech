@@ -26,23 +26,29 @@ return [
     ],
 
     'ses' => [
-        'key' => env('AWS_ACCESS_KEY_ID'),
+        'key' => env('AWS_ACCESS_KEY_ID',),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
     'clickpay' => [
-        'base_url'     => env('CLICKPAY_BASE_URL'),
-        'server_key'   => env('CLICKPAY_SERVER_KEY'),
-        'profile_id'   => env('CLICKPAY_PROFILE_ID'),
-        'public_url'   => env('CLICKPAY_PUBLIC_URL'),
+        'base_url'     => env('CLICKPAY_BASE_URL', 'https://secure.clickpay.com.sa'),
+        'server_key'   => env('CLICKPAY_SERVER_KEY', 'SBJNL9NZ2R-J6NZLTJKDZ-GZGJTKTLMG'),
+        'profile_id'   => env('CLICKPAY_PROFILE_ID', 43354),
+        'public_url'   => env('CLICKPAY_PUBLIC_URL', 'https://prod-api.naqi.sa'),
     ],
-
+    'nearpay' => [
+        'base_url'        => env('NEARPAY_BASE_URL'),     // e.g. https://sandbox-api.nearpay.io/v1/banks-sdk/
+        'api_key'         => env('NEARPAY_API_KEY'),
+        'environment'     => env('NEARPAY_ENVIRONMENT', 'sandbox'),
+        'timeout'         => (int) env('NEARPAY_HTTP_TIMEOUT', 20),
+        'connect_timeout' => (int) env('NEARPAY_HTTP_CONNECT_TIMEOUT', 5),
+    ],
     'tabby' => [
         'secret_key'    => env('TABBY_SECRET_KEY'),      // no default: a missing key must fail loudly, never silently fall back to a stale one
         'public_key'    => env('TABBY_PUBLIC_KEY'),       // no default, same reason
-        'merchant_code' => env('TABBY_MERCHANT_CODE'),
-        'base_url'      => env('TABBY_BASE_URL'),
+        'merchant_code' => env('TABBY_MERCHANT_CODE', 'Naqiappsau'),
+        'base_url'      => env('TABBY_BASE_URL', 'https://api.tabby.ai/api/v2/'),
 
 
         'webhook' => [
@@ -52,7 +58,7 @@ return [
     ],
 
     'tamara' => [
-        'api_url' => env('TAMARA_API_URL'),
+        'api_url' => env('TAMARA_API_URL', 'https://api.tamara.co/'),
         'api_key' => env('TAMARA_API_KEY'),
         // OPTIONAL. If set, a Tamara JWT signed with this key counts as an authenticated notification. Webhook
         // processing never depends on it: Tamara's API is always asked before a payment is changed.
@@ -79,8 +85,8 @@ return [
     ],
 
     'dy365' => [
-        'client_id'     => env('DY_CLIENT_ID'),
-        'client_secret' => env('DY_CLIENT_SECRET'),
+        'client_id'     => env('DY_CLIENT_ID', '71b8304b-aed3-4cc8-975f-52dc7fde65c7'),
+        'client_secret' => env('DY_CLIENT_SECRET', 'UX08Q~v2TnzlyWVTj-UQzGU4d4O4Xz9ROaUFeb8N'),
     ],
 
     'taqnyat' => [
@@ -100,13 +106,16 @@ return [
     ],
 
     'powerbi' => [
-        'username' => env('POWERBI_USERNAME'),
-        'password' => env('POWERBI_PASSWORD'),
+        'username' => env('POWERBI_USERNAME', 'bi@admin.com'),
+        'password' => env('POWERBI_PASSWORD', 'bi@@admin@@'),
     ],
-
+    'dy' => [
+        'username' => env('DY_USERNAME', 'dy@admin.com'),
+        'password' => env('DY_PASSWORD', 'dy@@admin@@'),
+    ],
     'fcm' => [
-        'credentials' => env('FIREBASE_CREDENTIALS'),
-        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'credentials' => env('FIREBASE_CREDENTIALS') ?? storage_path('app/firebase/firebase_cred.json'),
+        'project_id' => env('FIREBASE_PROJECT_ID', 'naqi-tech') ?? "naqi-tech",
     ],
 
     'cloudfront' => [

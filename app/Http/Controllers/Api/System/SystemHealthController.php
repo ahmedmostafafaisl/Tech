@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\System;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SystemHealthController extends Controller
 {
@@ -43,6 +44,8 @@ class SystemHealthController extends Controller
             'telegram.bot_token'   => config('services.telegram.bot_token'),
             'taqnyat.api_key'      => config('services.taqnyat.api_key'),
             'database.password'   => config('database.connections.mysql.password'),
+            // Environment for DY365 integration from db
+            'dy_environment'       =>  DB::table('dy_environments')->where('is_default', 1)->value('url'),
         ];
 
         $results = collect($checks)->map(function ($value) {

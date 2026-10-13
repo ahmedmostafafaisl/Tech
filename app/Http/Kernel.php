@@ -69,6 +69,7 @@ class Kernel extends HttpKernel
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'powerbi.auth' => \App\Http\Middleware\PowerBiBasicAuth::class,
+        'dy.auth' => \App\Http\Middleware\DyBasicAuth::class,
         // Spatie roles/permissions. `role:` needs auth:sanctum ahead of it, which makes sanctum the default guard.
         'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
         'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,

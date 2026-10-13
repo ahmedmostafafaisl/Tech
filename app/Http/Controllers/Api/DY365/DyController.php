@@ -35,6 +35,7 @@ use App\Services\Payment\TamaraDyLinkVerifier;
 use App\Services\Payment\TamaraOrderVerification;
 use App\Services\Payment\TabbyPaymentVerification;
 use App\Services\Sms\PhoneSmsRelayLimiter;
+use App\Services\Telegram\TelegramService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -1101,6 +1102,7 @@ class DyController extends Controller
                 'BundleId'          => $validated['bundleId'],
                 'WarrantyStatus' => 'None',
                 'PaymentMethod'  => 'CASH',
+                'bomBundleItemGroupId' => $product['BOMBundleItemGroupId'] ?? null,
             ])->toArray();
 
             // ── 4. Call addSalesLine ──────────────────────────────────────
@@ -1110,9 +1112,8 @@ class DyController extends Controller
                     'items'       => $items,
                 ],
             ];
-            // dd($payload);
-            Log::info('addBundleProductsToAppointment - Calling addSalesLine with payload', ['payload' => $payload]);
 
+            // TelegramService::send('Calling addSalesLine with payload: ' . json_encode($payload));
             $response = $this->dy_service->addSalesLine($payload);
 
             // ── 5. Save to DB ─────────────────────────────────────────────

@@ -36,16 +36,16 @@ class SettingSeeder extends Seeder
         // SMS-relay abuse limits (PhoneSmsRelayLimiter). getPaymentLinks and sendInvoice are called directly by
         // Dynamics and cannot carry a shared secret, so they stay unauthenticated; this is the protection against
         // using them to text an arbitrary phone number. Default: 3 messages per phone per 60 minutes, per endpoint.
-        Setting::firstOrCreate(['key' => 'sms_relay_payment_link_max_per_window'], ['value' => '5']);
+        Setting::firstOrCreate(['key' => 'sms_relay_payment_link_max_per_window'], ['value' => '10']);
         Setting::firstOrCreate(['key' => 'sms_relay_payment_link_window_minutes'], ['value' => '30']);
-        Setting::firstOrCreate(['key' => 'sms_relay_invoice_max_per_window'], ['value' => '5']);
+        Setting::firstOrCreate(['key' => 'sms_relay_invoice_max_per_window'], ['value' => '10']);
         Setting::firstOrCreate(['key' => 'sms_relay_invoice_window_minutes'], ['value' => '30']);
 
         // Same protection, for the two WhatsApp endpoints Dynamics calls directly (WhatsAppController::notify and
         // ::sendPreAppointmentMessage — the latter's lead_message branch shares the pre_appointment quota).
-        Setting::firstOrCreate(['key' => 'whatsapp_relay_notify_max_per_window'], ['value' => '5']);
+        Setting::firstOrCreate(['key' => 'whatsapp_relay_notify_max_per_window'], ['value' => '10']);
         Setting::firstOrCreate(['key' => 'whatsapp_relay_notify_window_minutes'], ['value' => '30']);
-        Setting::firstOrCreate(['key' => 'whatsapp_relay_pre_appointment_max_per_window'], ['value' => '5']);
+        Setting::firstOrCreate(['key' => 'whatsapp_relay_pre_appointment_max_per_window'], ['value' => '10']);
         Setting::firstOrCreate(['key' => 'whatsapp_relay_pre_appointment_window_minutes'], ['value' => '30']);
     }
 }

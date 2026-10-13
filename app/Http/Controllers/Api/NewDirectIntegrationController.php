@@ -4691,22 +4691,46 @@ class NewDirectIntegrationController extends Controller
             // is the real appointment status string on success.
             $status = $appointmentData['Status'] ?? null;
 
-            // Keep serials for appointments that are Completed, or still
-            // legitimately active/pending (Delayed, Scheduled) — only
-            // delete for anything else (Cancelled, unrecognized statuses)
-            // or genuinely not found.
-            $shouldDelete = $appointmentData === null
-                || $status === null
-                || $status === false
-                || !in_array($status, ['Completed', 'Delayed', 'Scheduled'], true);
+            $protectedStatus = $appointmentData !== null
+                && $status !== null
+                && $status !== false
+                && in_array($status, ['Completed', 'Delayed', 'Scheduled'], true);
+
+            if (! $protectedStatus) {
+                // Not found, Cancelled, or an unrecognized status: unchanged from before — delete.
+                $shouldDelete = true;
+                $reason = 'Serial deleted.';
+            } elseif ($status === 'Completed') {
+                // The only one of the three with a dy_body to check: did DY365 actually receive THIS
+                // serial? (see TransmittedSerials). null = dy_body missing/unparseable — "too early to
+                // tell", not "confirmed not sent" — so it is kept, the same as Delayed/Scheduled below.
+                $transmitted = \App\Services\Serials\TransmittedSerials::extract(
+                    DirectAppointment::where('book_id', $bookId)->latest('id')->value('dy_body')
+                );
+
+                if ($transmitted === null) {
+                    $shouldDelete = false;
+                    $reason = 'The appointment is Completed but its dy_body could not be read — cannot confirm either way, so it was kept.';
+                } else {
+                    $sent = in_array(\App\Services\Serials\UsedSerialFilter::clean($serial), $transmitted, true);
+                    $shouldDelete = ! $sent;
+                    $reason = $sent
+                        ? 'The appointment is Completed and DY365 confirms this serial was sent — cannot delete it.'
+                        : 'The appointment is Completed but DY365 never received this serial — deleted.';
+                }
+            } else {
+                // Delayed / Scheduled: not completed yet, so there is no dy_body at all to check against —
+                // "not sent yet" here only ever means "too early to tell", never "confirmed not sent".
+                $shouldDelete = false;
+                $reason = "The appointment status is {$status} — not completed yet, so this cannot be confirmed as unsent. Kept.";
+            }
 
             if ($shouldDelete) {
-
                 $deleted[] = [
                     'id' => $serialRow->id,
                     'book_id' => $bookId,
                     'status' => $status,
-                    'message' => 'Serial deleted.',
+                    'message' => $reason,
                 ];
                 $serialRow->delete();
             } else {
@@ -4714,14 +4738,14 @@ class NewDirectIntegrationController extends Controller
                     'id' => $serialRow->id,
                     'book_id' => $bookId,
                     'status' => $status,
-                    'message' => "The appointment status is {$status} — cannot delete this serial.",
+                    'message' => $reason,
                 ];
             }
         }
 
         $topLevelMessage = match (true) {
             count($deleted) > 0 && count($kept) === 0 => count($deleted) === 1 ? 'Serial deleted.' : 'Serials deleted.',
-            count($deleted) === 0 && count($kept) > 0 => 'Nothing deleted — all matching serials belong to Completed/Delayed/Scheduled appointments (or have no resolvable book_id).',
+            count($deleted) === 0 && count($kept) > 0 => 'Nothing deleted — every matching serial is either confirmed sent to DY365, or its appointment is not far enough along to tell (or has no resolvable book_id).',
             default => 'Cleanup completed — some serials deleted, some kept.',
         };
 
@@ -4740,6 +4764,74 @@ class NewDirectIntegrationController extends Controller
                 'kept' => $kept,
             ],
         ], $statusCode);
+    }
+
+    /**
+     * POST /integration/appointment-transaction-serials/check
+     *
+     * Is this (serial, item_number) still available for this technician to use, or is it already
+     * tied up on one of their own Completed/Scheduled appointments?
+     *
+     * available=false only when ALL of the following hold for at least one of this tech's own
+     * appointments: the serial is recorded against that item in appointment_transaction_serials, that
+     * appointment's own dy_body confirms DY365 actually received this exact serial (see
+     * TransmittedSerials — an orphaned, never-transmitted row never blocks availability), and DY365's
+     * current live status for that appointment is Completed or Scheduled. Anything short of all three
+     * — no matching local record, dy_body missing/unparseable, or any other live status (Delayed,
+     * Cancelled, not found) — means available=true.
+     *
+     * NOTE: "appointment status" here is the LIVE status from DY365 (refSingleAppointmentByBookId),
+     * the same source and vocabulary already used by deleteAppointmentTransactionSerial — not a status
+     * value stored locally. If a local field was actually intended instead, this is the one line to
+     * change.
+     *
+     * HTTP 400 when available=false, 200 when available=true.
+     */
+    public function checkSerialAvailability(\App\Http\Requests\Appointment\CheckSerialAvailabilityRequest $request)
+    {
+        $serial     = \App\Services\Serials\UsedSerialFilter::clean($request->validated('serial'));
+        $itemNumber = trim((string) $request->validated('item_number'));
+        $techId     = (int) $request->validated('tech_id');
+
+        $bookIds = \App\Models\AppointmentTransactionSerial::query()
+            ->join('appointment_transaction_lines', 'appointment_transaction_lines.id', '=', 'appointment_transaction_serials.appointment_transaction_line_id')
+            ->join('appointment_transactions', 'appointment_transactions.id', '=', 'appointment_transaction_lines.appointment_transaction_id')
+            ->where('appointment_transaction_serials.serial', $serial)
+            ->where('appointment_transaction_serials.item_number', $itemNumber)
+            ->where('appointment_transactions.tech_id', $techId)
+            ->whereNotNull('appointment_transactions.book_id')
+            ->distinct()
+            ->pluck('appointment_transactions.book_id');
+
+        foreach ($bookIds as $bookId) {
+            $appointmentData = $this->refSingleAppointmentByBookId($bookId);
+            $status          = $appointmentData['Status'] ?? null;
+
+            if (!in_array($status, ['Completed', 'Scheduled'], true)) {
+                continue;
+            }
+
+            $dyBody      = \App\Models\DirectAppointment::where('book_id', $bookId)->latest('id')->value('dy_body');
+            $transmitted = \App\Services\Serials\TransmittedSerials::extract($dyBody);
+
+            if ($transmitted !== null && in_array($serial, $transmitted, true)) {
+                return response()->json([
+                    'status' => true,
+                    'data'   => [
+                        'available' => false,
+                        'reason'    => "Already recorded on a {$status} appointment ({$bookId}) and confirmed sent to DY365.",
+                    ],
+                ], 400);
+            }
+        }
+
+        return response()->json([
+            'status' => true,
+            'data'   => [
+                'available' => true,
+                'reason'    => 'No Completed/Scheduled appointment of this technician has this serial confirmed sent to DY365.',
+            ],
+        ]);
     }
 
     // GET /integration/technicians/by-primary-warehouse?main_warehouse_id=XXXX
