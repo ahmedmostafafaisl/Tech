@@ -95,54 +95,17 @@ class CheckCompleteService
     }
 
 
+    /**
+     * The single, consolidated technician-ownership check. This used to exist as three near-identical
+     * copies (authorizeTechOrFail, authorizeTechOrFail_new, authorizeTechOrFail2) with different comparison
+     * strictness, used inconsistently across controllers — a maintenance risk, since a future fix made to
+     * one could easily be missed in the others. This is now the only one, using the strictest of the three
+     * comparisons (explicit empty-string guard + strict string equality), which is a pure safety
+     * improvement over the original loose `!=`: every $worker/tech_id pair that was correctly authorized
+     * before still is (both are always plain numeric-looking id values in practice), and nothing that
+     * previously passed only because of a `!=` type-juggling edge case can slip through silently now.
+     */
     public function authorizeTechOrFail($worker, $comment = null): void
-    {
-
-        $user = auth()->user();
-
-        $tech_id = $user->tech_id ?? $user->technician_rec_id ?? null;
-        // dd("Authorizing tech_id: $tech_id against worker: $worker");
-        if (!$user || $tech_id != $worker) {
-            // Log a comment before returning error
-            $logMessage = $comment ?? "Unauthorized attempt by tech_id: " . ($tech_id ?? 'guest');
-            Log::warning($logMessage, [
-                'auth_user_id' => $user->id ?? null,
-                'expected_tech_id' => $worker,
-            ]);
-
-            // Return 400 JSON error
-            abort(response()->json([
-                'status' => 'error',
-                'message' => 'You must update the appointments'
-            ], 403));
-        }
-
-        // Authorized → simply continue
-    }
-
-    public function authorizeTechOrFail_new($worker, $comment = null): void
-    {
-        $user = auth()->user();
-        $tech_id = $user->tech_id ?? $user->technician_rec_id ?? null;
-
-        if (!$user || (string)$tech_id !== (string)$worker) {
-            $logMessage = $comment ?? "Unauthorized attempt by tech_id: " . ($tech_id ?? 'guest');
-
-            Log::warning($logMessage, [
-                'auth_user_id' => $user->id ?? null,
-                'expected_tech_id' => $worker,
-                'actual_tech_id' => $tech_id,
-            ]);
-
-            throw new HttpResponseException(
-                response()->json([
-                    'status' => false,
-                    'message' => 'You must update the appointments',
-                ], 403)
-            );
-        }
-    }
-    public function authorizeTechOrFail2($worker, $comment = null): void
     {
         $user = auth()->user();
 
@@ -153,16 +116,18 @@ class CheckCompleteService
             $logMessage = $comment ?? "Unauthorized attempt by tech_id: " . ($techId ?: 'guest');
 
             Log::warning($logMessage, [
-                'auth_user_id'      => $user->id ?? null,
-                'auth_tech_id'      => $techId,
-                'expected_tech_id'  => $worker,
+                'auth_user_id'     => $user->id ?? null,
+                'auth_tech_id'     => $techId,
+                'expected_tech_id' => $worker,
             ]);
 
             abort(response()->json([
-                'status'  => 'error',
-                'message' => 'You are not authorized to update this appointment',
+                'status' => 'error',
+                'message' => 'You must update the appointments'
             ], 403));
         }
+
+        // Authorized → simply continue
     }
 
 

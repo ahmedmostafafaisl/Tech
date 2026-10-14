@@ -519,14 +519,14 @@ class DyController extends Controller
             return response()->json(['message' => 'No warehouses found.'], 404);
         }
 
-        return   $allStocks = [];
+        $allStocks = [];
 
         foreach ($warehouses as $warehouse) {
             $payload = [
                 'warehouseId' => $warehouse->invent_location_id,
             ];
 
-            return $response = $this->dy_service->getWarehouseStock($payload);
+            $response = $this->dy_service->getWarehouseStock($payload);
 
             // You may need to decode JSON if the service returns a JSON string
             $stock = is_string($response) ? json_decode($response, true) : $response;
@@ -809,12 +809,13 @@ class DyController extends Controller
             'salesOrderId' => $appointment->sales_order_id,
         ];
 
+        $response = $this->dy_service->getOrCreateInvoice($payload);
 
-        return $response = $this->dy_service->getOrCreateInvoice($payload);
-
-        if (isset($response['Error'])) {
+        if (is_array($response) && isset($response['Error'])) {
             return response()->json(['message' => $response['Error']], 400);
         }
+
+        return response()->json($response);
     }
 
     // send pdf link
@@ -943,7 +944,7 @@ class DyController extends Controller
             'salesOrderId' => $request->sales_order_id,
             'requestType' => $request->request_type  // 0 for cancel , 1 for reschedule
         ];
-        return $response = $this->dy_service->getCustomerChangeRequests($payload);
+        return $response = $this->dy_service->submitCustomerChangeRequest($payload);
     }
 
     // get customer change requests

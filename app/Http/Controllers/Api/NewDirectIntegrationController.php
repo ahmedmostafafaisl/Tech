@@ -1783,7 +1783,7 @@ class NewDirectIntegrationController extends Controller
             }
 
             try {
-                $this->checkCompleteService->authorizeTechOrFail_new(
+                $this->checkCompleteService->authorizeTechOrFail(
                     $requestTechId,
                     "Tech ID mismatch detected before updating appointment {$book_id}"
                 );

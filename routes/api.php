@@ -335,12 +335,16 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 Route::get('user-logs/auth/user', [UserLogController::class, 'getAuthUserLogs'])->middleware('auth:sanctum');
 
-// sync custom warehouse stock  by item number
-Route::get('dy365/sync-warehouses/stock/', [WarehouseController::class, 'syncCustomWarehouseStock']);
-// Sync custom technician stock
-Route::get('dy365/sync-technician/stock/{id}', [UserStockController::class, 'syncCustomTechnicianStock']);
-// dy365 routes
-Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
+// sync custom warehouse stock  by item number — confirmed backend/ops-only, never called by the mobile app
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('dy365/sync-warehouses/stock/', [WarehouseController::class, 'syncCustomWarehouseStock']);
+// Sync custom technician stock — same
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('dy365/sync-technician/stock/{id}', [UserStockController::class, 'syncCustomTechnicianStock']);
+
+// dy365 reference-data / per-technician-reporting routes — confirmed backend/admin/ops-only, never called
+// directly by the mobile app. Deliberately a SEPARATE group from the one below: that one also carries
+// addSalesLine/updateSalesLine/deleteSalesLine, which technicians DO call directly (authorized per-request
+// via authorizeTechOrFail, not by role) — those must keep plain auth:sanctum, not be swept into this.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('dy365')->group(function () {
     Route::get('/warehouses', [DyController::class, 'getWarehouses']);
     Route::get('/product-categories', [DyController::class, 'getProductCategories']);
     Route::get('/payment-methods', [DyController::class, 'getPaymentMethods']);
@@ -352,6 +356,11 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     Route::get('/tech/appointments', [DyController::class, 'getTechnicianAppointments']);
     Route::get('/warehouses/stock', [DyController::class, 'getWarehouseStock']);
     Route::get('/tech/change-status-requests', [DyController::class, 'getTechnicianChangeStatusRequests']);
+});
+
+// dy365 routes — technician-facing (authorized per-request inside each method) and other sync jobs not
+// explicitly reviewed; left exactly as before
+Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     // Add sales line to appointment
     Route::post('/appointments/add-sales-line', [DyController::class, 'addSalesLine']);
     // Update sales line in appointment
@@ -471,7 +480,7 @@ Route::middleware('auth:sanctum')->prefix('transfer-orders')->group(function () 
     Route::get('/tech/transfer', [TransferOrderController::class, 'newTechnicianTransfers']);
 });
 // scheduler
-Route::middleware(['auth:sanctum'])->get('/run-scheduler', [SchedulerController::class, 'runAll']);
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('/run-scheduler', [SchedulerController::class, 'runAll']);
 
 // commands
 Route::middleware(['auth:sanctum'])->prefix('run')->group(function () {
