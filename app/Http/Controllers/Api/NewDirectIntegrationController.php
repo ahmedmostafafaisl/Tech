@@ -329,6 +329,17 @@ class NewDirectIntegrationController extends Controller
                     $this->serialsOfAppointmentByItem((string) $bookId, $serialItemNumbers)
                 );
             }
+
+            // Permanent, status-independent exclusion: a serial confirmed sent to DY365 under a DIFFERENT
+            // appointment is never selectable here again — not after 90 days (reservedSerialsByItem's own
+            // window), and not because that OTHER appointment's live status later shows Cancelled/Deferral
+            // for reasons unrelated to the sale itself. Backed by an indexed lookup table populated once at
+            // completion time (see TransmittedSerialIndexer), never a live dy_body parse, so this stays fast
+            // regardless of how many appointments exist.
+            $usedSerialsByItem = \App\Services\Serials\UsedSerialWindow::mergeByItem(
+                $usedSerialsByItem,
+                $this->permanentlyTransmittedSerialsByItem((string) $bookId, $serialItemNumbers)
+            );
         }
 
         // ✅ Appointment bundles by book_id
@@ -865,6 +876,34 @@ class NewDirectIntegrationController extends Controller
         $dyBody = DirectAppointment::where('book_id', $bookId)->latest('id')->value('dy_body');
         $transmitted = \App\Services\Serials\TransmittedSerials::extract($dyBody);
         $rows = \App\Services\Serials\TransmittedSerials::filter($rows, $transmitted);
+
+        return \App\Services\Serials\UsedSerialWindow::groupAll($rows);
+    }
+
+    /**
+     * Every serial confirmed sent to DY365 under any OTHER appointment — permanently, with no time window
+     * and no dependency on that other appointment's current status. One indexed query against
+     * transmitted_serials (populated at completion time, see TransmittedSerialIndexer), never a live
+     * dy_body parse — this is what keeps singleAppointmentByBookId fast regardless of how many appointments
+     * exist.
+     *
+     * @param  array<int, string>|null  $itemNumbers
+     * @return array<string, array<int, string>> lower-cased item_number => serial list
+     */
+    private function permanentlyTransmittedSerialsByItem(string $exceptBookId, ?array $itemNumbers = null): array
+    {
+        if ($itemNumbers !== null && $itemNumbers === []) {
+            return [];
+        }
+
+        $rows = \App\Models\TransmittedSerial::query()
+            ->select('item_number', 'serial')
+            ->where('book_id', '!=', $exceptBookId)
+            ->when(
+                $itemNumbers !== null,
+                fn($query) => $query->whereIn('item_number', $itemNumbers)
+            )
+            ->get();
 
         return \App\Services\Serials\UsedSerialWindow::groupAll($rows);
     }

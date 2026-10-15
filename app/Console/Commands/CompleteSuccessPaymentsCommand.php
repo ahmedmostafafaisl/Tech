@@ -241,6 +241,15 @@ class CompleteSuccessPaymentsCommand extends Command
                 'dy_body' => json_encode($body, JSON_UNESCAPED_UNICODE),
             ]);
 
+            // Index every serial this appointment is ABOUT to send, the moment dy_body itself is written —
+            // deliberately BEFORE the DY365 call below, and regardless of whether that call goes on to
+            // succeed or fail. The physical serial was handed to a technician and is being sent for THIS
+            // appointment either way; it must not be selectable for a different appointment while that is
+            // true, rejection/retry included. This is also what makes the permanent exclusion in
+            // singleAppointmentByBookId correct independent of that OTHER appointment's live status later
+            // (Cancelled/Deferral included) and independent of how much time has passed since.
+            \App\Services\Serials\TransmittedSerialIndexer::syncForAppointment($appointment->fresh());
+
             $response = app(DyService::class)->completeSuccessPaymentsV2($body);
             $data     = is_array($response) ? $response : (array) $response;
 
