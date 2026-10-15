@@ -802,10 +802,7 @@ class WhatsAppController extends Controller
 
         $entry = $request->input('entry.0.changes.0.value');
 
-        // Delivery status update (sent/delivered/read/failed). This was
-        // previously completely missing from this method — any status
-        // callback was silently discarded here, meaning "accepted" (from
-        // the original send response) was the ONLY status this app ever
+        // Delivery status update (sent/delivered/read/failed).
         // recorded, regardless of what actually happened afterward.
         if ($entry && isset($entry['statuses'][0])) {
             foreach ($entry['statuses'] as $statusEvent) {

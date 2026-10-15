@@ -25,8 +25,7 @@ final class AuthAttemptLimiter
         private readonly string $key,
         private readonly int $maxAttempts,
         private readonly int $decaySeconds,
-    ) {
-    }
+    ) {}
 
     public static function otp(int|string $userId): self
     {
@@ -36,6 +35,12 @@ final class AuthAttemptLimiter
     public static function pin(int|string $userId): self
     {
         return new self("auth:pin-attempts:{$userId}", self::MAX_ATTEMPTS, self::DECAY_SECONDS);
+    }
+
+    /** Appointment-completion OTP (AppointmentController::sendOtp/verifyOtp) — keyed by appointment, not user. */
+    public static function appointmentCompletion(int|string $appointmentId): self
+    {
+        return new self("auth:appointment-completion-otp-attempts:{$appointmentId}", self::MAX_ATTEMPTS, self::DECAY_SECONDS);
     }
 
     public function tooManyAttempts(): bool

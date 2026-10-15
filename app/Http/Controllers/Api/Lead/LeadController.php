@@ -40,6 +40,8 @@ class LeadController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $this->authorizeAdmin();
+
         $query = OrderLead::with('responses')->latest();
 
         // 🔍 Filter by mobile number (partial)
@@ -159,6 +161,8 @@ class LeadController extends Controller
      */
     public function show(string $id): JsonResponse
     {
+        $this->authorizeAdmin();
+
         $lead = $this->leadService->getById($id, withResponses: true);
 
         if (! $lead) {
@@ -203,6 +207,18 @@ class LeadController extends Controller
             ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    /**
+     * Leads have no per-user ownership concept (unlike, say, an appointment's assigned technician) — this
+     * is purely an ops/dashboard view of every customer lead. Previously reachable by any authenticated
+     * user under the `dashboard` prefix; admin-only now.
+     */
+    private function authorizeAdmin(): void
+    {
+        if (!auth()->user()?->hasAnyRole(['super_admin', 'admin'])) {
+            abort(403, 'You are not authorized to perform this action.');
         }
     }
 }

@@ -40,6 +40,7 @@ class Appointment extends Model
         'discount_value',
         'maintenance_type',
         'complete_otp',
+        'complete_otp_sent_at',
         'from',
         'to',
         'sales_order_id',
@@ -65,6 +66,7 @@ class Appointment extends Model
     protected $casts = [
         'total_price' => 'float',
         'collect' => 'float',
+        'complete_otp_sent_at' => 'datetime',
     ];
     protected $attributes = [
         'dy_response' => '{"status":"pending"}',

@@ -175,17 +175,29 @@ class AppointmentController extends Controller
 
     // complete appointment otp
 
+    /**
+     * This OTP confirms appointment completion with the customer — a real consequence if guessed, so it
+     * gets the same treatment as the login/PIN OTPs: a cryptographically-random code (was rand(), not
+     * random_int()), a recorded send time so verifyOtp can reject a stale code (there was no expiry
+     * concept at all before), and restricted to the appointment's own assigned technician (there was no
+     * ownership check: any authenticated user could trigger a resend to someone else's customer).
+     */
     public function sendOtp($id)
     {
         $appointment = Appointment::where('id', $id)->first();
         if (!$appointment) return response()->json(['message' => 'appointment not found'], 404);
-        $otp = rand(1000, 9999);
+
+        if ((int) $appointment->technician_id !== (int) auth()->id()) {
+            abort(403, 'You are not authorized to complete this appointment.');
+        }
+
+        $otp = random_int(1000, 9999);
         $phone = $appointment->customer?->phone ?? $appointment->phone;
 
-        $appointment->update(['complete_otp' => $otp]);
+        $appointment->update(['complete_otp' => $otp, 'complete_otp_sent_at' => now()]);
         $response = $this->smsService->sendOtp($phone, $otp);
 
-        $email = $appointment->customer->email;
+        $email = $appointment->customer?->email;
         if ($email) {
             Mail::to($email)->send(new \App\Mail\SendOtpMail($otp));
         }
@@ -193,12 +205,43 @@ class AppointmentController extends Controller
         return  $this->setCode(200)->setData($email)->setMessage('OTP sent successfully.')->send();
     }
 
+    /**
+     * Previously: no rate limit (a 4-digit code — 9,000 values — was brute-forceable in minutes with
+     * unlimited attempts), no expiry check, and no ownership check (any authenticated user could attempt
+     * to verify any appointment's OTP). All three closed below; the actual matching rule is unchanged.
+     */
     public function verifyOtp($id, Request $request)
     {
         $appointment  = Appointment::where('id', $id)->first();
         // Check if appointment exists
         if (!$appointment) return response()->json(['message' => 'appointment not found'], 404);
-        return     $appointment_otp = $this->appointmentRepo->verifyOtp($appointment, $request->otp);
+
+        if ((int) $appointment->technician_id !== (int) auth()->id()) {
+            abort(403, 'You are not authorized to complete this appointment.');
+        }
+
+        $limiter = \App\Services\Auth\AuthAttemptLimiter::appointmentCompletion($appointment->id);
+
+        if ($limiter->tooManyAttempts()) {
+            return response()->json(['message' => 'Too many attempts. Please request a new OTP.'], 429);
+        }
+
+        $sentAt = $appointment->complete_otp_sent_at;
+
+        if (!$appointment->complete_otp || !$sentAt || $sentAt->diffInSeconds(now()) > \App\Services\Auth\AuthAttemptLimiter::DECAY_SECONDS) {
+            return response()->json(['message' => 'This OTP has expired. Please request a new one.'], 422);
+        }
+
+        $result = $this->appointmentRepo->verifyOtp($appointment, $request->otp);
+
+        if ((string) $appointment->complete_otp !== (string) $request->otp) {
+            $limiter->hit();
+        } else {
+            $limiter->clear();
+            $appointment->update(['complete_otp' => null, 'complete_otp_sent_at' => null]);
+        }
+
+        return $result;
     }
 
     // Sync all   appointments via API
@@ -372,8 +415,21 @@ class AppointmentController extends Controller
 
     public function applyDiscount(Request $request, $id)
     {
+        // discount_value previously had no upper bound at all: a percentage discount over 100, or a fixed
+        // discount far exceeding the appointment's own total, could both be submitted and accepted. The
+        // assigned-technician ownership check below (in the repository) already limits WHO can do this to
+        // the appointment's own technician; this limits WHAT they can submit.
         $validated = $request->validate([
-            'discount_value' => 'required|numeric|min:0',
+            'discount_value' => [
+                'required',
+                'numeric',
+                'min:0',
+                function ($attribute, $value, $fail) use ($request) {
+                    if (($request->input('discount_type') ?? 'fixed') === 'percentage' && $value > 100) {
+                        $fail('A percentage discount cannot exceed 100.');
+                    }
+                },
+            ],
             'discount_type'  => 'nullable|in:fixed,percentage',
         ]);
         $discountType = $validated['discount_type'] ?? 'fixed';

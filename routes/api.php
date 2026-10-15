@@ -147,6 +147,15 @@ Route::middleware('auth:sanctum')->prefix('technician')->group(function () {
 Route::middleware('auth:sanctum')->prefix('appointments')->group(function () {
     Route::get('/all', [AppointmentController::class, 'index']);
     Route::post('/', [AppointmentController::class, 'store']);
+
+    // Must be registered before the generic GET /{id} below — otherwise Laravel matches
+    // GET /appointments/change-status-requests against /{id} first (treating "change-status-requests"
+    // literally as the id), and AppointmentChangeStatusRequestController::index() is never reachable at
+    // all. (store/show/update/destroy on this resource were unaffected — they either use a different HTTP
+    // method or have a second path segment that doesn't collide with the single-segment /{id} pattern.)
+    Route::apiResource('/change-status-requests', AppointmentChangeStatusRequestController::class);
+    Route::get('my/requests', [AppointmentChangeStatusRequestController::class, 'myRequests']);
+
     Route::get('/{id}', [AppointmentController::class, 'show']);
     Route::put('/{id}', [AppointmentController::class, 'update']);
     // Route::delete('/{id}', [AppointmentController::class, 'destroy']);
@@ -175,10 +184,6 @@ Route::middleware('auth:sanctum')->prefix('appointments')->group(function () {
     Route::post('/send-otp/{id}', [AppointmentController::class, 'sendOtp']);
     Route::post('/verify-otp/{id}', [AppointmentController::class, 'verifyOtp']);
 
-    // get appointment change status requests
-    Route::apiResource('/change-status-requests', AppointmentChangeStatusRequestController::class);
-    Route::get('my/requests', [AppointmentChangeStatusRequestController::class, 'myRequests']);
-
     // handle sales line
     Route::post('/handle-sales-line', [AppointmentController::class, 'handleSalesLine']);
     // get pending
@@ -198,9 +203,14 @@ Route::middleware('auth:sanctum')->prefix('appointments')->group(function () {
     Route::post('/delete/{id}', [AppointmentController::class, 'deleteAppointmentWithSalesLines']);
     Route::get('v2/nonCompleted/appointments', [AppointmentController::class, 'sendNonCompletedAppointmentsReminder']);
 });
-Route::get('appointments/export/processing', [AppointmentController::class, 'exportProcessingAppointments']);
-Route::get('appointments/export/direct', [AppointmentController::class, 'exportDirectAppointments']);
-Route::get('appointments/export/direct/specific', [AppointmentController::class, 'exportSpecificDirectAppointments']);
+// These three were outside auth:sanctum entirely — a bulk export of every paid appointment, including the
+// raw dy_response blob from DY365, downloadable by anyone who found the URL. Restricted to the same
+// super_admin|admin level as the other backend/ops-only DY365 endpoints.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->group(function () {
+    Route::get('appointments/export/processing', [AppointmentController::class, 'exportProcessingAppointments']);
+    Route::get('appointments/export/direct', [AppointmentController::class, 'exportDirectAppointments']);
+    Route::get('appointments/export/direct/specific', [AppointmentController::class, 'exportSpecificDirectAppointments']);
+});
 
 // warehouses routes
 Route::middleware('auth:sanctum')->prefix('warehouses')->group(function () {
@@ -840,7 +850,10 @@ Route::prefix('v1/appointment-forms')->group(function () {
     Route::get('/options/{optionId}/fields', [AppointmentFormController::class, 'fields']);
 });
 
-Route::middleware('auth:sanctum')
+// Despite the "-admin" prefix, these three groups previously required only auth:sanctum — any authenticated
+// technician could modify the shared appointment type/option/field tree every other technician's forms run
+// on. Now actually admin-only.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])
     ->prefix('v1/appointment-forms-admin')
     ->group(function () {
         // Create / Update Types
@@ -853,7 +866,7 @@ Route::middleware('auth:sanctum')
         Route::put('/options/{optionId}/fields', [AppointmentFormAdminController::class, 'setFields']);
     });
 
-Route::middleware('auth:sanctum')
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])
     ->prefix('v1/appointment-forms-admin/bulk')
     ->group(function () {
 
@@ -865,7 +878,7 @@ Route::middleware('auth:sanctum')
     });
 
 // for add new type
-Route::middleware('auth:sanctum')
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])
     ->prefix('v1/appointment-forms-admin')
     ->group(function () {
         Route::post('/types/full', [AppointmentFormAdminController::class, 'storeTypeWithData']);
