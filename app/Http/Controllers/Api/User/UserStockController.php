@@ -13,6 +13,7 @@ use App\Http\Requests\User\StoreUserStockRequest;
 use App\Http\Requests\User\UpdateUserStockRequest;
 use App\Repositories\Interfaces\UserStockRepositoryInterface;
 use App\Exports\UserStockExport;
+use App\Models\UserStock;
 use Maatwebsite\Excel\Facades\Excel;
 
 class UserStockController extends Controller
@@ -26,14 +27,20 @@ class UserStockController extends Controller
         $this->dyService = $dynamicsService;
     }
 
+    /** Previously reachable for any user_id by any authenticated user. */
     public function show(int $userId)
     {
+        $this->authorizeUserOrAdmin($userId);
+
         return $stock = $this->userStockRepository->getUserStock($userId);
     }
 
+    /** user_id came from the request body with no check at all — any user could update anyone else's stock. */
     public function storeOrUpdate(StoreUserStockRequest $request)
     {
         $data = $request->validated();
+
+        $this->authorizeUserOrAdmin($data['user_id']);
 
         $result = $this->userStockRepository->createOrUpdateUserStock(
             $data['user_id'],
@@ -47,8 +54,17 @@ class UserStockController extends Controller
         ]);
     }
 
+    /** Previously reachable for any user stock record's id by any authenticated user. */
     public function destroy(int $id)
     {
+        $userStock = UserStock::find($id);
+
+        if (!$userStock) {
+            return response()->json(['message' => 'User stock not found'], 404);
+        }
+
+        $this->authorizeUserOrAdmin($userStock->user_id);
+
         $deleted = $this->userStockRepository->delete($id);
 
         return response()->json([
@@ -64,6 +80,8 @@ class UserStockController extends Controller
             'items.*.item_id' => 'required|exists:items,id',
             'items.*.quantity' => 'required|integer|min:1'
         ]);
+
+        $this->authorizeUserOrAdmin($data['user_id']);
 
         $result = $this->userStockRepository->addItems($data['user_id'], $data['items']);
 
@@ -82,6 +100,8 @@ class UserStockController extends Controller
             'parts.*.quantity' => 'required|integer|min:1'
         ]);
 
+        $this->authorizeUserOrAdmin($data['user_id']);
+
         $result = $this->userStockRepository->addParts($data['user_id'], $data['parts']);
 
         return response()->json([
@@ -90,7 +110,23 @@ class UserStockController extends Controller
         ]);
     }
 
+    /** @throws \Illuminate\Http\Exceptions\HttpResponseException */
+    private function authorizeUserOrAdmin(int $userId): void
+    {
+        $authUser = auth()->user();
+        $isSelf   = $authUser && (int) $authUser->id === $userId;
+        $isAdmin  = $authUser?->hasAnyRole(['super_admin', 'admin']) ?? false;
 
+        if (!$isSelf && !$isAdmin) {
+            abort(403, 'You are not authorized to access this user\'s stock.');
+        }
+    }
+
+
+    /**
+     * Previously had `return $summary = [];` right before the loop below, making the entire sync
+     * unreachable dead code — this endpoint has never actually synced any technician's stock.
+     */
     public function syncTechnicianStock()
     {
         try {
@@ -101,7 +137,7 @@ class UserStockController extends Controller
                 return response()->json(['status' => false, 'message' => 'No technicians found.'], 404);
             }
 
-            return    $summary = [];
+            $summary = [];
             $pageSize = 300; // You can adjust this
 
             foreach ($users as $technician) {

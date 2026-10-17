@@ -127,6 +127,10 @@ class WarehouseController extends Controller
         }
     }
 
+    /**
+     * Previously had `return $results = [];` right before this loop, making the entire paginated sync
+     * below unreachable dead code — this endpoint has never actually synced any warehouse stock.
+     */
     public function syncWarehouseStock()
     {
         try {
@@ -136,7 +140,7 @@ class WarehouseController extends Controller
                 return response()->json(['message' => 'No warehouses found.'], 404);
             }
 
-            return   $results = [];
+            $results = [];
 
             foreach ($warehouses as $warehouse) {
                 if (!$warehouse->rec_id) {

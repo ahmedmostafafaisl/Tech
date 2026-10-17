@@ -370,6 +370,9 @@ Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('dy365')->
 
 // dy365 routes — technician-facing (authorized per-request inside each method) and other sync jobs not
 // explicitly reviewed; left exactly as before
+// Technician-facing: authorized per-request inside each method (authorizeTechOrFail, or the new
+// technician_id ownership check on completeSuccessPayments) — must keep plain auth:sanctum, not be swept
+// into the admin-only group below.
 Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     // Add sales line to appointment
     Route::post('/appointments/add-sales-line', [DyController::class, 'addSalesLine']);
@@ -377,6 +380,17 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     Route::post('/appointments/update-sales-line', [DyController::class, 'updateSalesLine']);
     // delete appointment sales lines
     Route::post('/appointments/delete-sales-line', [DyController::class, 'deleteSalesLine']);
+    // complete success payments — a technician completing one specific sales line's payment, not a bulk sync
+    Route::get('/sync/complete-success-payments', [DyController::class, 'completeSuccessPayments']);
+    // get sales history — not yet confirmed whether this needs its own per-technician scoping; left
+    // unchanged pending that review rather than guessed at here
+    Route::get('/sales-history/{id}', [DyController::class, 'getSalesHistory']);
+});
+
+// Backend/ops-only bulk sync jobs — confirmed the same category as the DY365 sync group fixed earlier
+// (never called by the mobile app). Previously only auth:sanctum, mixed in with the technician-facing
+// group above; split out and restricted to super_admin|admin.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('dy365')->group(function () {
     // Sync categories and warehouses
     Route::get('/sync-categories', [CategoryController::class, 'syncCategories']);
     Route::get('/sync-warehouses', [WarehouseController::class, 'syncWarehouses']);
@@ -391,23 +405,17 @@ Route::middleware('auth:sanctum')->prefix('dy365')->group(function () {
     Route::get('/sync/technician/transfers/{id}', [TransferOrderController::class, 'syncCustomTechnicianTransfers']);
     // Sync appointments
     Route::get('/sync/appointments', [AppointmentController::class, 'syncAllAppointments']);
-    // Sync all technicians appointments
+    // Sync all technicians appointments — the underlying repository method is intentionally disabled
+    // (returns immediately); restricting this route does not re-enable it, it only narrows who could reach
+    // the (currently no-op) endpoint at all.
     Route::get('/sync/technician/appointments', [AppointmentController::class, 'syncAllTechnicianAppointments']);
     // Sync appointment by sales order
     Route::get('/sync/appointments/sales-order/{id}', [AppointmentController::class, 'getAppointmentBySalesOrder']);
     // Sync warehouses stock
     Route::get('/sync/warehouses/stock', [WarehouseController::class, 'syncWarehouseStock']);
-    // sync tech transfers
-    Route::get('/sync/technician/transfers', [TransferOrderController::class, 'syncAllTechnicianTransfers']);
 
     // Sync all technicians change status requests
     Route::get('/sync/technician/change-status-requests', [AppointmentChangeStatusRequestController::class, 'syncAllTechnicianChangeStatusRequests']);
-    // complete success payments
-    Route::get('/sync/complete-success-payments', [DyController::class, 'completeSuccessPayments']);
-    // get sales history
-    Route::get('/sales-history/{id}', [DyController::class, 'getSalesHistory']);
-
-    // DY365 Payment
 });
 Route::post('dy365/payments/links', [DyController::class, 'getPaymentLinks']);
 
@@ -420,8 +428,12 @@ Route::post('/tabby/webhook/reference_id={reference_id}/payment_method={payment_
 
 // routes/api.php or web.php
 Route::post('get/payment/status', [DyController::class, 'getPaymentStatus'])->name('dy.payment.status');
-// Roles and Permissions routes
-Route::prefix('admin')->middleware(['auth:sanctum'])->group(function () {
+// Roles and Permissions routes — previously only auth:sanctum, despite the "/admin" prefix: any
+// authenticated user, including a plain technician, could create/update roles and permissions (a direct
+// privilege-escalation path — e.g. adding a powerful permission to a role they already hold) and view the
+// full inventory report. Found while tracing inventory/all's actual route group for Part 5; fixed
+// immediately given the severity, even though it's outside that part's own controllers.
+Route::prefix('admin')->middleware(['auth:sanctum', 'role:super_admin|admin'])->group(function () {
     // Roles
     Route::get('roles', [RolePermissionController::class, 'roles']);
     Route::post('roles', [RolePermissionController::class, 'storeRole']);

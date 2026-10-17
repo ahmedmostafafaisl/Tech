@@ -43,30 +43,52 @@ class WarehouseTransferController extends Controller
     }
 
 
+    /** Previously reachable for any transfer id by any authenticated user. */
     public function update(UpdateWarehouseTransferRequest $request,   $id)
     {
         $transfer = WarehouseTransfer::where('id', $id)->first();
         if (!$transfer) {
             return response()->json(['message' => 'transfer Not found .'], 400);
         }
+        $this->authorizeOwnerOrAdmin($transfer->tech_id);
+
         $updated = $this->service->updateTransfer($transfer, $request->validated());
 
         return new WarehouseTransferResource($updated);
     }
 
+    /** Previously reachable for any transfer id by any authenticated user. */
     public function show($id)
     {
         $transfer = $this->repo->find($id);
+        $this->authorizeOwnerOrAdmin($transfer?->tech_id);
+
         return response()->json([
             'status' => 'success',
             'data' => new SingleWarehouseTransferResource($transfer),
         ]);
     }
 
+    /** Previously reachable for any transfer id by any authenticated user. */
     public function destroy($id)
     {
+        $transfer = $this->repo->find($id);
+        $this->authorizeOwnerOrAdmin($transfer?->tech_id);
+
         $this->repo->delete($id);
         return response()->json(['message' => 'Warehouse transfer deleted successfully.']);
+    }
+
+    /** @throws \Illuminate\Http\Exceptions\HttpResponseException */
+    private function authorizeOwnerOrAdmin($techId): void
+    {
+        $authUser = auth()->user();
+        $isOwner  = $authUser && $techId !== null && (int) $authUser->id === (int) $techId;
+        $isAdmin  = $authUser?->hasAnyRole(['super_admin', 'admin']) ?? false;
+
+        if (!$isOwner && !$isAdmin) {
+            abort(403, 'You are not authorized to access this warehouse transfer.');
+        }
     }
 
     public function getMyRequests(Request $request)

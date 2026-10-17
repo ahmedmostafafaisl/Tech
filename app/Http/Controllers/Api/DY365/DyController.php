@@ -758,6 +758,12 @@ class DyController extends Controller
     }
 
     // complete success payments
+    /**
+     * technician_id was accepted from the request body with no check it belonged to the caller — any
+     * authenticated technician could submit a payment completion against a different technician's sales
+     * line by simply passing a different id. Same ownership check already used by addSalesLine/
+     * updateSalesLine/deleteSalesLine on this same controller.
+     */
     public function completeSuccessPayments(Request $request)
     {
         $validated = $request->validate([
@@ -767,6 +773,11 @@ class DyController extends Controller
             'TotalAmount' => 'required|numeric',
             'PaymentMethod' => 'required|string',
         ]);
+
+        $this->checkCompleteService->authorizeTechOrFail(
+            $validated['technician_id'],
+            "Unauthorized completeSuccessPayments attempt for technician_id {$validated['technician_id']}"
+        );
 
         // Build payload in the desired format
         $payload = [

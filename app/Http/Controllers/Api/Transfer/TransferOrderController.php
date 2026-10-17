@@ -56,24 +56,40 @@ class TransferOrderController extends Controller
         return new TransferOrderResource($order);
     }
 
+    /** Previously reachable for any transfer order id by any authenticated user. */
     public function show($id)
     {
         $order = $this->transferOrderRepo->find($id);
+        $this->authorizeOwnerOrAdmin($order?->tech_id);
+
         return new TransferOrderResource($order);
     }
 
+    /** Previously reachable for any transfer order id by any authenticated user. */
     public function update(TransferOrderRequest $request, $id)
     {
+        $existing = $this->transferOrderRepo->find($id);
+        $this->authorizeOwnerOrAdmin($existing?->tech_id);
+
         $order = $this->transferOrderRepo->update($id, $request->validated());
         return new TransferOrderResource($order);
     }
 
+    /** Previously reachable for any transfer order id by any authenticated user. */
     public function destroy($id)
     {
+        $existing = $this->transferOrderRepo->find($id);
+        $this->authorizeOwnerOrAdmin($existing?->tech_id);
+
         $this->transferOrderRepo->delete($id);
         return response()->json(['message' => 'Transfer order deleted successfully']);
     }
 
+    /**
+     * Previously returned inside the loop the moment ONE technician had transfer data — every other
+     * technician was silently skipped. Now processes all of them and reports which succeeded and which
+     * didn't, matching the same pattern already fixed for syncAllTechnicianChangeStatusRequests.
+     */
     public function syncAllTechnicianTransfers()
     {
         try {
@@ -82,6 +98,9 @@ class TransferOrderController extends Controller
             if ($users->isEmpty()) {
                 return response()->json(['message' => 'No technicians found.'], 404);
             }
+
+            $synced = [];
+            $failed = [];
 
             foreach ($users as $technician) {
                 if (!$technician->technician_rec_id) {
@@ -94,12 +113,17 @@ class TransferOrderController extends Controller
 
                 if (isset($response['Data']['TransferOrders']) && is_array($response['Data']['TransferOrders'])) {
                     $this->transferOrderRepo->syncTransferOrder($response['Data']['TransferOrders'], $technician->id);
-                    return response()->json(['message' => 'Transfers synced successfully']);
+                    $synced[] = $technician->technician_rec_id;
                 } else {
-
-                    continue;
+                    $failed[] = ['tech_id' => $technician->technician_rec_id, 'reason' => 'No transfer orders found'];
                 }
             }
+
+            return response()->json([
+                'message' => count($synced) > 0 ? 'Transfers synced successfully' : 'Failed to sync Transfers',
+                'synced'  => $synced,
+                'failed'  => $failed,
+            ], count($synced) > 0 ? 200 : 500);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to sync Transfers: ' . $e->getMessage()], 500);
         }
@@ -217,8 +241,11 @@ class TransferOrderController extends Controller
     }
 
     // tech transfers
+    /** tech_id previously accepted with no check it belonged to the caller — any authenticated technician
+     *  could view another technician's transfers just by passing their id. */
     public function getTransferOrders($tech_id, Request $request)
     {
+        $this->authorizeOwnerOrAdmin($tech_id);
 
         $response = $this->service->getTechnicianTransfersWithLocalStatus($tech_id, $request->input('currentPage', 1), $request->input('pageSize', 30), $request->input('searchTerm', ''));
 
@@ -228,8 +255,23 @@ class TransferOrderController extends Controller
             ->send();
     }
 
+    /** Same IDOR as getTransferOrders() above. */
     public function getSingleTransferOrders($tech_id, $transferOrderId)
     {
+        $this->authorizeOwnerOrAdmin($tech_id);
+
         return   $response = $this->service->getSingleTransferAndSyncTechStatus($tech_id, $transferOrderId);
+    }
+
+    /** @throws \Illuminate\Http\Exceptions\HttpResponseException */
+    private function authorizeOwnerOrAdmin($techId): void
+    {
+        $authUser = auth()->user();
+        $isOwner  = $authUser && $techId !== null && (int) $authUser->id === (int) $techId;
+        $isAdmin  = $authUser?->hasAnyRole(['super_admin', 'admin']) ?? false;
+
+        if (!$isOwner && !$isAdmin) {
+            abort(403, 'You are not authorized to access this transfer order.');
+        }
     }
 }
