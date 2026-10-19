@@ -15,6 +15,10 @@ class DyPaymentLink extends Model
         'status',
         'amount',
         'phone',
+        'customer_account',
+        'book_id',
+        'dy_body',
+        'dy_response',
         'checkout_url',
         'payment_id',
     ];

@@ -148,15 +148,21 @@ final class TamaraWebhookProcessor
     private function transition(DyPaymentLink $link, array $update, string $dyStatus, array $context): array
     {
         try {
+            // DyPaymentLinkTransitions::complete() updates the local record before notifying DY365 and no
+            // longer throws when DY365 refuses the notification (see 'done_dy_notification_failed' below) —
+            // this catch is only for a genuinely unexpected failure now, not DY365 rejecting it.
             $result = $this->transitions->complete($link, $update, $dyStatus);
         } catch (\Throwable $e) {
-            // Log::error('Tamara webhook: DY365 did not accept the notification; link left unchanged', $context + ['error' => $e->getMessage()]);
+            Log::error('Tamara webhook: unexpected failure completing the payment locally', $context + ['error' => $e->getMessage()]);
 
-            return [503, ['status' => 'error', 'message' => 'DY365 could not be notified. The notification can be retried.']];
+            return [503, ['status' => 'error', 'message' => 'The notification could not be recorded. It can be retried.']];
         }
 
         return match ($result) {
-            'done'    => $this->done($context, [200, ['status' => 'ok']], $update['status']),
+            // Tamara shouldn't be asked to retry just because OUR downstream notification to DY365 failed —
+            // the payment is genuinely recorded locally either way; DY365 not acknowledging it is logged
+            // inside complete() for separate follow-up.
+            'done', 'done_dy_notification_failed' => $this->done($context, [200, ['status' => 'ok']], $update['status']),
             'already' => $this->done($context, [200, ['status' => 'ok', 'message' => 'Already processed.']], 'already_processed'),
             default   => $this->refuse($context, 409, 'This payment link can no longer be changed.', 'invalid_state'),
         };

@@ -20,7 +20,7 @@ class TechnicianAppointmentLogController extends Controller
             'search' => 'nullable|string|max:255',
             'date_from' => 'nullable|date',
             'date_to' => 'nullable|date|after_or_equal:date_from',
-            'per_page' => 'nullable|integer|min:1|max:100',
+            'per_page' => 'nullable|integer|min:1|max:1000',
         ]);
 
         $query = TechnicianAppointmentLog::query();

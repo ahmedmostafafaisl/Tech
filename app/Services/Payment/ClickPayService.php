@@ -281,6 +281,8 @@ class ClickPayService
                     'status' => 'created',
                     'amount' => $amount,
                     'phone' => $data['phone'] ?? '0522222222',
+                    'customer_account' => $data['customeraccount'] ?? null,
+                    'book_id' => $data['bookId'] ?? null,
                 ]);
                 $dyPayment->lines()->createMany($payment['items']);
                 return [

@@ -226,14 +226,21 @@ class DyController extends Controller
         }
 
         try {
+            // completeDyLink() updates the local record BEFORE notifying DY365 — the provider already
+            // confirmed this payment above, so a DY365 outage or rejection no longer leaves it stuck at
+            // "created" or shows the customer an error for a payment that genuinely succeeded. A
+            // 'done_dy_notification_failed' result still means the payment is paid and recorded locally;
+            // DY365 not acknowledging it is logged there for separate follow-up, not shown here. This
+            // catch is only for a genuinely unexpected failure (e.g. a database error), not DY365 refusing
+            // the notification.
             $result = $this->completeDyLink($payment, ['status' => 'success', 'payment_id' => $verified['payment_id']], 'Approved');
         } catch (\Throwable $e) {
-            // Log::error('DY payment link success: DY365 did not accept the notification; link left unchanged', [
-            //     'dy_reference_id' => $payment->dy_reference_id,
-            //     'error'           => $e->getMessage(),
-            // ]);
+            Log::error('DY payment link success: unexpected failure completing the payment locally', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
 
-            return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
+            return response()->json(['status' => 'error', 'message' => 'The payment was verified but could not be recorded. Please refresh to try again.'], 502);
         }
 
         if ($result === 'invalid_state') {
@@ -329,14 +336,18 @@ class DyController extends Controller
         }
 
         try {
+            // Same change as success() above: the local status is updated before DY365 is told, so a
+            // 'done_dy_notification_failed' result still means this change is recorded locally — DY365's
+            // own acknowledgement failing is logged inside complete(), not treated as an error here. This
+            // catch is only for a genuinely unexpected failure.
             $result = $this->completeDyLink($payment, ['status' => $newStatus], $dyStatus);
         } catch (\Throwable $e) {
-            // Log::error('DY payment link ' . $newStatus . ': DY365 did not accept the notification; link left unchanged', [
-            //     'dy_reference_id' => $payment->dy_reference_id,
-            //     'error'           => $e->getMessage(),
-            // ]);
+            Log::error('DY payment link ' . $newStatus . ': unexpected failure completing the payment locally', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
 
-            return response()->json(['status' => 'error', 'message' => 'DY365 could not be notified. Please try again.'], 502);
+            return response()->json(['status' => 'error', 'message' => 'This change could not be recorded. Please try again.'], 502);
         }
 
         if ($result === 'invalid_state') {
@@ -346,7 +357,7 @@ class DyController extends Controller
         return $this->dyLinkResultView($payment->fresh(), $newStatus);
     }
 
-    /** @return string 'done' | 'already' | 'invalid_state'  (throws when DY365 does not accept the notification) */
+    /** @return string 'done' | 'done_dy_notification_failed' | 'already' | 'invalid_state' */
     private function completeDyLink(DyPaymentLink $payment, array $update, string $dyStatus): string
     {
         return app(DyPaymentLinkTransitions::class)->complete($payment, $update, $dyStatus);
