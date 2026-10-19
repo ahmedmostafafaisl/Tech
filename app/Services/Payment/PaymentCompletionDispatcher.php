@@ -266,16 +266,23 @@ class PaymentCompletionDispatcher
         $payloadJson = json_encode($body, JSON_UNESCAPED_UNICODE);
         $payloadB64  = base64_encode($payloadJson);
 
-        $bgLogFile = storage_path('logs/payments_complete_bg.log');
-
-        $cmd = "php " . escapeshellarg(base_path('artisan')) . " payments:complete "
-            . escapeshellarg((string) $appointment->id) . " "
-            . escapeshellarg($payloadB64)
-            . " >> " . escapeshellarg($bgLogFile) . " 2>&1 &";
-
-
-
-        exec($cmd);
+        // Previously a raw background shell command (php artisan ... &). That's unobservable and
+        // fragile in a way that matches exactly what was seen in production: complete_v2_calling stuck at
+        // "running:" forever with dy_body/dy_response still null — meaning payments:complete never
+        // actually ran, or died before reaching its own dy_body write. A detached shell process leaves no
+        // trace if it fails to spawn at all (a disabled exec() in a hardened PHP-FPM pool is a common way
+        // for this to silently no-op), if the webserver's process group gets recycled before it fully
+        // detaches, or for any number of other reasons a bare `&` shell job can vanish without a trace.
+        // Artisan::queue() dispatches through Laravel's own queue (config/queue.php hardcodes the
+        // 'database' driver here) instead of a shell subprocess — same fire-and-forget behavior (this
+        // method still returns immediately; a queue worker processes it separately), but failures land in
+        // the failed_jobs table where they're visible, and the job the same code already runs elsewhere
+        // (SyncTechnicianStockJob, fixed the same way) confirms a worker is actually running against this
+        // queue connection.
+        \Illuminate\Support\Facades\Artisan::queue('payments:complete', [
+            'appointmentId' => (string) $appointment->id,
+            'bodyB64'       => $payloadB64,
+        ]);
 
         // 7) send WhatsApp evaluation if required
         //check if customer phone and order type are available before sending evaluation
