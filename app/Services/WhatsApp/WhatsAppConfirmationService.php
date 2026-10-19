@@ -25,7 +25,19 @@ class WhatsAppConfirmationService
                 'template' => $templateName,
             ]);
 
-            return ['status' => 'skipped', 'reason' => 'whatsapp_send_messages_active is off'];
+            // Every caller of this method (EvaluationMessageController, ResendPreAppointmentMessages,
+            // WhatsAppController, and others) calls ->json()/->successful() on the result, assuming it's
+            // always a real Illuminate\Http\Client\Response — this used to return a plain array here
+            // instead, which crashed every one of those callers with "Call to a member function json() on
+            // array" the moment this kill switch was turned off. A real Response object (implements
+            // ArrayAccess, so $response['messages'] still works for the one caller that uses that instead
+            // of ->json()) keeps every existing caller working without changing any of them.
+            return new \Illuminate\Http\Client\Response(
+                new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                    'status' => 'skipped',
+                    'reason' => 'whatsapp_send_messages_active is off',
+                ]))
+            );
         }
 
         $components = [];
