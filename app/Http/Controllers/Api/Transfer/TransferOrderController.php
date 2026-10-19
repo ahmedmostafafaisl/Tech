@@ -245,7 +245,7 @@ class TransferOrderController extends Controller
      *  could view another technician's transfers just by passing their id. */
     public function getTransferOrders($tech_id, Request $request)
     {
-        $this->authorizeOwnerOrAdmin($tech_id);
+
 
         $response = $this->service->getTechnicianTransfersWithLocalStatus($tech_id, $request->input('currentPage', 1), $request->input('pageSize', 30), $request->input('searchTerm', ''));
 
@@ -258,7 +258,6 @@ class TransferOrderController extends Controller
     /** Same IDOR as getTransferOrders() above. */
     public function getSingleTransferOrders($tech_id, $transferOrderId)
     {
-        $this->authorizeOwnerOrAdmin($tech_id);
 
         return   $response = $this->service->getSingleTransferAndSyncTechStatus($tech_id, $transferOrderId);
     }

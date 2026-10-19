@@ -99,57 +99,23 @@ class NewCompleteAppointmentRequest extends FormRequest
                 );
             }
 
-            // ── 3) Same-technician serial reuse check ────────────────────────────
-            $techId = $this->input('tech_id');
-
-            if ($techId && $bookId) {
-                $excludedBookIds = \App\Models\ChangeRequest::query()
-                    ->where('tech_id', $techId)
-                    ->whereBetween('created_at', [today()->subDay()->startOfDay(), today()->endOfDay()])
-                    ->pluck('book_id')
+            // ── 3) Serial reuse check ──────────────────────────────────────────
+            // Same shared, permanent rule the appointment API uses to decide available_serials (see
+            // PermanentlyTransmittedSerials): a serial is rejected here only if it's confirmed sent to
+            // DY365 under a DIFFERENT appointment with no ChangeRequest against it. Previously this
+            // duplicated its own, different, time-windowed "same technician, picked today" check — which
+            // could reject a serial the appointment API was still showing as selectable, since neither
+            // definition agreed with the other.
+            if ($bookId) {
+                $itemNumbers = collect($this->input('items', []))
+                    ->pluck('ItemNumber')
                     ->filter()
+                    ->map(fn($i) => strtolower(trim($i)))
                     ->unique()
                     ->values()
-                    ->toArray();
+                    ->all();
 
-                $cleanSerial = fn($s) => preg_replace(
-                    '/[\pZ\pC\x{00A0}\x{200B}\x{FEFF}]+/u',
-                    '',
-                    (string) $s
-                );
-
-                $reservedRows = \App\Models\AppointmentTransactionSerial::query()
-                    ->select(
-                        'appointment_transaction_serials.item_number',
-                        'appointment_transaction_serials.serial',
-                        'appointment_transactions.book_id'
-                    )
-                    ->join(
-                        'appointment_transaction_lines',
-                        'appointment_transaction_lines.id',
-                        '=',
-                        'appointment_transaction_serials.appointment_transaction_line_id'
-                    )
-                    ->join(
-                        'appointment_transactions',
-                        'appointment_transactions.id',
-                        '=',
-                        'appointment_transaction_lines.appointment_transaction_id'
-                    )
-                    ->where('appointment_transactions.tech_id', $techId)
-                    ->where('appointment_transactions.book_id', '!=', $bookId)
-                    ->whereBetween('appointment_transactions.created_at', [today()->subDay()->startOfDay(), today()->endOfDay()])
-                    ->when(!empty($excludedBookIds), function ($query) use ($excludedBookIds) {
-                        $query->whereNotIn('appointment_transactions.book_id', $excludedBookIds);
-                    })
-                    ->get();
-
-                // item_number => [ cleaned_serial => book_id ]
-                $reservedByItem = $reservedRows
-                    ->groupBy(fn($row) => strtolower(trim($row->item_number)))
-                    ->map(function ($rows) use ($cleanSerial) {
-                        return $rows->mapWithKeys(fn($row) => [$cleanSerial($row->serial) => $row->book_id]);
-                    });
+                $reservedByItem = \App\Services\Serials\PermanentlyTransmittedSerials::reservedBookIdsByItem($bookId, $itemNumbers);
 
                 foreach ($this->input('items', []) as $index => $item) {
                     $serials = $item['serials'] ?? [];
@@ -159,14 +125,14 @@ class NewCompleteAppointmentRequest extends FormRequest
                     }
 
                     $itemNumber = strtolower(trim($item['ItemNumber'] ?? ''));
-                    $reservedSerialMap = $reservedByItem->get($itemNumber, collect());
+                    $reservedSerialMap = $reservedByItem[$itemNumber] ?? [];
 
-                    if ($reservedSerialMap->isEmpty()) {
+                    if (empty($reservedSerialMap)) {
                         continue;
                     }
 
                     foreach ($serials as $serialIndex => $serial) {
-                        $reservedBookId = $reservedSerialMap->get($cleanSerial($serial));
+                        $reservedBookId = $reservedSerialMap[\App\Services\Serials\PermanentlyTransmittedSerials::cleanSerial($serial)] ?? null;
 
                         if ($reservedBookId !== null) {
                             $validator->errors()->add(

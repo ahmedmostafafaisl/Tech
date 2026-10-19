@@ -9,10 +9,14 @@ use Illuminate\Support\Facades\Validator;
 
 class TimeOutLogController extends Controller
 {
+    /**
+     * tech_id previously came straight from the request body with no check against the caller — any
+     * authenticated user could create a timeout log entry attributed to a different technician. Now
+     * derived from the authenticated user, the same way TechController resolves it elsewhere.
+     */
     public function store(Request $request)
     {
         $validated = Validator::make($request->all(), [
-            'tech_id' => 'required|string',
             'route' => 'required|string',
             'body' => 'nullable|string',
             'time' => 'nullable',
@@ -26,8 +30,11 @@ class TimeOutLogController extends Controller
             ], 400);
         }
 
+        $user = $request->user();
+        $techId = $user->tech_id ?? $user->technician_rec_id;
+
         $log = TimeOutLog::create([
-            'tech_id' => $request->tech_id,
+            'tech_id' => $techId,
             'route' => $request->route,
             'body' => $request->body,
             'time' => $request->time ?? now(),
@@ -100,18 +107,34 @@ class TimeOutLogController extends Controller
         ]);
     }
 
-    // update method to be implemented
+    /**
+     * Previously reachable for any log id by any authenticated user, and $request->all() let tech_id
+     * itself be silently reassigned (the model's $fillable did limit it to the four real columns, but
+     * tech_id — the thing this audit trail is supposed to attribute — was one of them). Now owner-or-admin,
+     * and tech_id is never changeable through this endpoint at all, admin included: nothing legitimately
+     * reassigns who a log entry belongs to after the fact.
+     */
     public function update(Request $request)
     {
         $this->validate($request, [
             'id' => 'required|exists:time_out_logs,id',
-            'tech_id' => 'sometimes|string',
             'route' => 'sometimes|string',
             'body' => 'sometimes|string',
             'time' => 'sometimes',
         ]);
+
         $log = TimeOutLog::find($request->id);
-        $log->update($request->all());
+
+        $authUser = auth()->user();
+        $callerTechId = $authUser ? ($authUser->tech_id ?? $authUser->technician_rec_id) : null;
+        $isOwner = $callerTechId !== null && (string) $callerTechId === (string) $log->tech_id;
+        $isAdmin = $authUser?->hasAnyRole(['super_admin', 'admin']) ?? false;
+
+        if (!$isOwner && !$isAdmin) {
+            abort(403, 'You are not authorized to update this log.');
+        }
+
+        $log->update($request->only(['route', 'body', 'time']));
 
         return response()->json([
             'status' => 200,

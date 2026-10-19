@@ -30,9 +30,13 @@ class TaskController extends Controller
         return   $this->taskRepository->getAllTasks($perPage, $page, $priority, $status);
     }
 
+    /** Previously reachable for any task id by any authenticated user; now owner-or-admin. */
     public function show($id)
     {
-        return $this->setCode(code: 200)->setData(new TaskResource($this->taskRepository->getTaskById($id)))->setMessage('success')->send();
+        $task = $this->taskRepository->getTaskById($id);
+        $this->authorizeOwnerOrAdmin($task?->technician_id);
+
+        return $this->setCode(code: 200)->setData(new TaskResource($task))->setMessage('success')->send();
     }
 
     public function store(StoreTaskRequest $request)
@@ -41,8 +45,12 @@ class TaskController extends Controller
         return $this->setCode(code: 200)->setData(new TaskResource($task))->setMessage('success')->send();
     }
 
+    /** Previously reachable for any task id by any authenticated user; now owner-or-admin. */
     public function update(UpdateTaskRequest $request, $id)
     {
+        $existing = $this->taskRepository->getTaskById($id);
+        $this->authorizeOwnerOrAdmin($existing?->technician_id);
+
         $task = $this->taskRepository->updateTask($id, $request->validated());
         return $this->setCode(code: 200)->setData(new TaskResource($task))->setMessage('success')->send();
     }
@@ -69,5 +77,17 @@ class TaskController extends Controller
             ->setData(TaskResource::collection($tasks))
             ->setMessage('success')
             ->send();
+    }
+
+    /** @throws \Illuminate\Http\Exceptions\HttpResponseException */
+    private function authorizeOwnerOrAdmin(?int $technicianId): void
+    {
+        $authUser = auth()->user();
+        $isOwner  = $authUser && $technicianId !== null && (int) $authUser->id === $technicianId;
+        $isAdmin  = $authUser?->hasAnyRole(['super_admin', 'admin']) ?? false;
+
+        if (!$isOwner && !$isAdmin) {
+            abort(403, 'You are not authorized to access this task.');
+        }
     }
 }

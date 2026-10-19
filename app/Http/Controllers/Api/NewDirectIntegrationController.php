@@ -321,8 +321,6 @@ class NewDirectIntegrationController extends Controller
             ->all();
 
         if (! empty($appointment['Worker']) && $serialItemNumbers !== []) {
-            $usedSerialsByItem = $this->reservedSerialsByItem((string) $appointment['Worker'], (string) $bookId, $serialItemNumbers);
-
             if (($appointment['Status'] ?? null) === 'Completed') {
                 $usedSerialsByItem = \App\Services\Serials\UsedSerialWindow::mergeByItem(
                     $usedSerialsByItem,
@@ -890,22 +888,17 @@ class NewDirectIntegrationController extends Controller
      * @param  array<int, string>|null  $itemNumbers
      * @return array<string, array<int, string>> lower-cased item_number => serial list
      */
+    /**
+     * Delegates to the shared PermanentlyTransmittedSerials service (also used by mainWarehouse below, and
+     * by SendPaymentLinksRequest / NewCompleteAppointmentRequest's validation) so every place that decides
+     * "is this serial available" or "may this serial be submitted" uses one definition. A serial is
+     * excluded only when it's confirmed sent to DY365 under a DIFFERENT appointment AND that appointment
+     * has no ChangeRequest — a change/cancel request means the original transmission may be voided, so the
+     * serial must not stay permanently locked away.
+     */
     private function permanentlyTransmittedSerialsByItem(string $exceptBookId, ?array $itemNumbers = null): array
     {
-        if ($itemNumbers !== null && $itemNumbers === []) {
-            return [];
-        }
-
-        $rows = \App\Models\TransmittedSerial::query()
-            ->select('item_number', 'serial')
-            ->where('book_id', '!=', $exceptBookId)
-            ->when(
-                $itemNumbers !== null,
-                fn($query) => $query->whereIn('item_number', $itemNumbers)
-            )
-            ->get();
-
-        return \App\Services\Serials\UsedSerialWindow::groupAll($rows);
+        return \App\Services\Serials\PermanentlyTransmittedSerials::reservedSerialsByItem($exceptBookId, $itemNumbers);
     }
 
     public function mainWarehouse(Request $request)
@@ -963,12 +956,13 @@ class NewDirectIntegrationController extends Controller
         })->toArray();
 
         /**
-         * Serials this technician has already reserved (excluding appointments they
-         * raised a change request on) — shared with singleAppointmentByBookId() via
-         * reservedSerialsByItem() so both endpoints use one definition of "used".
+         * Same shared, permanent rule as singleAppointmentByBookId() and the payment-link/completion
+         * validators: a serial is hidden here only if it's confirmed sent to DY365 under a different
+         * appointment with no ChangeRequest against it. Previously used reservedSerialsByItem()'s
+         * time-windowed "picked by this technician today" rule instead, which (like the bug fixed on
+         * singleAppointmentByBookId) could hide a serial that was never actually sent anywhere.
          */
-        $todayReservedSerials = $this->reservedSerialsByItem(
-            (string) $request->workerId,
+        $todayReservedSerials = \App\Services\Serials\PermanentlyTransmittedSerials::reservedSerialsByItem(
             null,
             collect($products)->pluck('ItemNumber')->filter()->unique()->values()->all()
         );

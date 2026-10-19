@@ -160,10 +160,18 @@ class TechController extends Controller
 
         return $this->setCode(code: 200)->setData([])->setMessage('FCM token updated successfully.')->send();
     }
+    /**
+     * 'stock' was missing from the validation list below — despite the elseif branch existing for it
+     * specifically, it was unreachable through this endpoint before now. That branch also used to build a
+     * shell command string and run it with exec() (escapeshellarg() on $techId did make it safe in
+     * practice, but the pattern itself is fragile and fire-and-forget with no error handling or
+     * deduplication) — replaced with the SyncTechnicianStockJob queued job, which was already written and
+     * imported in this file but never actually dispatched anywhere.
+     */
     public function SyncTechFunctions(Request $request)
     {
         $request->validate([
-            'function' => 'required|string|in:transfers,appointments',
+            'function' => 'required|string|in:transfers,appointments,stock',
         ]);
         $user = $request->user();
         $techId = $user->tech_id ?? $user->technician_rec_id;
@@ -176,9 +184,7 @@ class TechController extends Controller
             return $this->syncTechnicianAppointments($techId);
         } elseif ($request->function === "stock") {
             $techId = $user->tech_id ?? $user->technician_rec_id;
-            // Run command in background
-            $cmd = "php " . base_path('artisan') . " sync:technician-stock " . escapeshellarg($techId) . " > /dev/null 2>&1 &";
-            exec($cmd);
+            SyncTechnicianStockJob::dispatch($techId);
 
             return response()->json([
                 'status'  => true,
@@ -192,18 +198,18 @@ class TechController extends Controller
         return $this->setCode(code: 200)->setData([])->setMessage('Tech functions synced successfully.')->send();
     }
 
+    /**
+     * Not currently called from anywhere in this class (SyncTechFunctions dispatches
+     * SyncTechnicianStockJob instead) — this was dead code with a premature return making the try/do-while
+     * below unreachable. Fixed for correctness since it costs nothing (still unused either way), but left
+     * unwired rather than deciding on its behalf that it should replace the job-based path.
+     */
     protected function syncTechnicianStock(User $technician): array
     {
         $page = 1;
         $pageSize = 700;
         $totalSynced = 0;
 
-        return [
-            'status' => 'success',
-            'technician_id' => $technician->id,
-            'total_synced' => $totalSynced,
-            'message' => "Synced $totalSynced stock items successfully."
-        ];
         try {
             do {
 

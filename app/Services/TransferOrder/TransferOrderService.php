@@ -348,8 +348,14 @@ class TransferOrderService
 
     // tech transfers
 
-    public function getTechnicianTransfersWithLocalStatus($techId, $currentPage = 1, $pageSize = 30, $searchTerm = '')
-    {
+
+
+    public function getTechnicianTransfersWithLocalStatus(
+        $techId,
+        $currentPage = 1,
+        $pageSize = 30,
+        $searchTerm = ''
+    ) {
         $payload = [
             'worker' => $techId,
             'currentPage' => $currentPage,
@@ -359,16 +365,44 @@ class TransferOrderService
 
         $response = $this->dyService->getTechnicianTransfers($payload);
 
-        if (!($response['Status'] ?? false)) {
-            Log::channel('dy')->error('DY error', $response);
+        if (
+            !is_array($response) ||
+            !data_get($response, 'Status', false)
+        ) {
+            Log::error('Failed to get technician transfers', [
+                'tech_id' => $techId,
+                'response' => $response,
+            ]);
+
             return false;
         }
 
-        $transfers = data_get($response, 'Data', []);
+        $dyData = data_get($response, 'Data', []);
 
-        return     $mappedTransfers = $this->repo->mapTechnicianStatusFromDb(
-            $transfers
-        );
+        $transfers = data_get($dyData, 'TransferOrders', []);
+
+        if (!is_array($transfers)) {
+            Log::error('Invalid technician transfers format', [
+                'tech_id' => $techId,
+                'response' => $response,
+            ]);
+
+            return false;
+        }
+
+        // Preserve your existing database-based technician status mapping.
+        $transfers = $this->repo->mapTechnicianStatusFromDb($transfers);
+
+        return [
+            'CurrentPage' => (int) data_get($dyData, 'CurrentPage', $currentPage),
+            'PagesTotal' => (int) data_get($dyData, 'PagesTotal', 0),
+            'TransferOrdersCount' => (int) data_get(
+                $dyData,
+                'TransferOrdersCount',
+                count($transfers)
+            ),
+            'TransferOrders' => $transfers,
+        ];
     }
 
     // single transfer order

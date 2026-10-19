@@ -82,5 +82,6 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\ResendPreAppointmentMessages::class,
         \App\Console\Commands\ResendEvaluationMessages::class,
         \App\Console\Commands\SendDailyConfirmedExportLinks::class,
+        \App\Console\Commands\BackfillTransmittedSerialsCommand::class,
     ];
 }
