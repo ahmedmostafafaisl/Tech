@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Customer\CustomerController;
 use App\Http\Controllers\Api\Dashboard\DashboardController;
 use App\Http\Controllers\Api\Dashboard\DirectPaymentController;
 use App\Http\Controllers\Api\DY365\DyController;
+use App\Http\Controllers\Api\TransmittedSerial\TransmittedSerialController;
 use App\Http\Controllers\Api\DY365\SchedulerController;
 use App\Http\Controllers\Api\Evaluation\EvaluationMessageController;
 use App\Http\Controllers\Api\Invoice\InvoiceController;
@@ -422,6 +423,13 @@ Route::post('dy365/payments/links', [DyController::class, 'getPaymentLinks']);
 // Browses every customer's payment links, not a single technician's or customer's own data — admin-only,
 // unlike the public, rate-limited endpoint above (which DY365 itself calls to create a link).
 Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('dy365/payments/links', [DyController::class, 'listPaymentLinks']);
+
+// Admin-only browsing/maintenance of the permanent-exclusion index itself (see
+// PermanentlyTransmittedSerials) — not something a technician or customer ever needs direct access to.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('transmitted-serials')->group(function () {
+    Route::get('/', [TransmittedSerialController::class, 'index']);
+    Route::delete('/{transmittedSerial}', [TransmittedSerialController::class, 'destroy']);
+});
 
 Route::get('/tabby/success/reference_id={reference_id}/payment_method={payment_method}', [DyController::class, 'success'])->name('dy.tabby.success');
 Route::get('/tabby/cancel/reference_id={reference_id}/payment_method={payment_method}', [DyController::class, 'cancel'])->name('dy.tabby.cancel');
