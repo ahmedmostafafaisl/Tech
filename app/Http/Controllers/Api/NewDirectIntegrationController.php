@@ -299,6 +299,13 @@ class NewDirectIntegrationController extends Controller
         }
 
         $appointment = $response['Data'];
+
+        // This appointment's own current DY365 status is already in hand here — if it's Canceled, this
+        // records it as a ChangeRequest the first time it's seen, so every other appointment's lookup of a
+        // serial this one transmitted is immediately released without needing its own DY365 call. See
+        // CancellationChangeRequestRecorder for the full rationale.
+        \App\Services\Serials\CancellationChangeRequestRecorder::recordIfCancelled((string) $bookId, $appointment);
+
         $salesLines = $appointment['SalesLines'] ?? [];
         // $rec = User::where('tech_id', $appointment['Worker'])->orderByDesc('id')->first();
         $rec = $this->getTechnicianUser($appointment['Worker']);
@@ -911,7 +918,7 @@ class NewDirectIntegrationController extends Controller
             'bookId' => 'nullable|string',
             'workerId' => 'required|string',
         ]);
-        // $request->bookId = null;
+
         if ($validated->fails()) {
             return response()->json(['error' => $validated->errors()], 400);
         }
@@ -1012,6 +1019,12 @@ class NewDirectIntegrationController extends Controller
             }
 
             $appointmentData = $appointmentResponse['Data'] ?? [];
+
+            // Same opportunistic detection as singleAppointmentByBookId — this appointment's current DY365
+            // status is already in hand here, so a Canceled one is recorded as a ChangeRequest the first
+            // time it's seen, with no extra DY365 call of its own. See CancellationChangeRequestRecorder.
+            \App\Services\Serials\CancellationChangeRequestRecorder::recordIfCancelled((string) $request->bookId, is_array($appointmentData) ? $appointmentData : null);
+
             $salesLines = $appointmentData['SalesLines'] ?? [];
             $salesLines = is_array($salesLines) ? $salesLines : [];
 
