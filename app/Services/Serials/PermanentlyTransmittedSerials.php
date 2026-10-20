@@ -2,7 +2,6 @@
 
 namespace App\Services\Serials;
 
-use App\Models\ChangeRequest;
 use App\Models\TransmittedSerial;
 use App\Services\DY365\DyService;
 use Illuminate\Support\Collection;
@@ -56,12 +55,6 @@ class PermanentlyTransmittedSerials
             return [];
         }
 
-        $excludedBookIds = ChangeRequest::query()
-            ->whereNotNull('book_id')
-            ->pluck('book_id')
-            ->unique()
-            ->values();
-
         // item_number filtering happens in PHP, not SQL: item_number case varies between callers (DY365
         // responses, request bodies) and what's stored here, and the grouping below already normalizes to
         // lower-case — an SQL whereIn on the raw, differently-cased values would silently drop matching
@@ -70,10 +63,20 @@ class PermanentlyTransmittedSerials
             ? collect($itemNumbers)->map(fn($i) => strtolower(trim((string) $i)))->all()
             : null;
 
+        // Previously fetched every book_id that has EVER had a ChangeRequest into a PHP array, then used
+        // whereNotIn() with it — binding one SQL parameter per row. In production that list grew well past
+        // MySQL's prepared-statement placeholder limit (1390: "too many placeholders"), breaking this query
+        // outright on every call. whereNotExists() checks the same condition as a subquery instead, with no
+        // array binding at all, so it stays correct regardless of how large change_requests grows.
         $rows = TransmittedSerial::query()
             ->select('item_number', 'serial', 'book_id')
             ->when($exceptBookId !== null, fn($q) => $q->where('book_id', '!=', $exceptBookId))
-            ->when($excludedBookIds->isNotEmpty(), fn($q) => $q->whereNotIn('book_id', $excludedBookIds))
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('change_requests')
+                    ->whereColumn('change_requests.book_id', 'transmitted_serials.book_id')
+                    ->whereNotNull('change_requests.book_id');
+            })
             ->get();
 
         $cancelledBookIds = self::liveCancelledBookIds($rows->pluck('book_id')->unique()->values());

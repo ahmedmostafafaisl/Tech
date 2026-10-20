@@ -25,7 +25,7 @@ class DyCheckoutRequest extends FormRequest
             'city' => ['nullable', 'string'],
             'country' => ['nullable', 'string'],
             'shipping_address.zip' => ['nullable', 'string'],
-            'customeraccount' => ['nullable', 'string'],
+            'custAccount' => ['nullable', 'string'],
             'bookId' => ['nullable', 'string'],
 
             // 🔹 Payments array

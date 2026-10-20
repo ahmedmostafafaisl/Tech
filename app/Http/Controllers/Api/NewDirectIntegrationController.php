@@ -911,7 +911,7 @@ class NewDirectIntegrationController extends Controller
             'bookId' => 'nullable|string',
             'workerId' => 'required|string',
         ]);
-
+        // $request->bookId = null;
         if ($validated->fails()) {
             return response()->json(['error' => $validated->errors()], 400);
         }
@@ -997,7 +997,7 @@ class NewDirectIntegrationController extends Controller
         })->toArray();
 
         // Update response with cleaned and filtered serials
-        $warehouseResponse['Data']['Products'] = $products;
+        return   $warehouseResponse['Data']['Products'] = $products;
 
         if (empty($request->bookId)) {
             $filteredProducts = $products;

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\DY365;
 use App\Helper\ApiResponseHelper;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DY365\DyCheckoutRequest;
+use App\Http\Requests\DY365\ListDyPaymentLinksRequest;
 use App\Http\Requests\Product\AddBundleProductsToAppointmentRequest;
 use App\Http\Requests\Product\GetProductsRequest;
 use App\Models\Appointment;
@@ -153,6 +154,73 @@ class DyController extends Controller
         $limiter->hit($requested);
 
         return $this->dy_service->getPaymentLinks($validated);
+    }
+
+    /**
+     * Paginated, filterable listing of DY payment links with their lines eager-loaded (avoids an N+1 query
+     * per row). Admin-only at the route — this browses every customer's payment links, not a single
+     * technician's or customer's own data.
+     */
+    public function listPaymentLinks(ListDyPaymentLinksRequest $request)
+    {
+        $validated = $request->validated();
+
+        $query = DyPaymentLink::query()->with('lines');
+
+        if (!empty($validated['payment_method'])) {
+            $query->where('payment_method', $validated['payment_method']);
+        }
+
+        if (!empty($validated['status'])) {
+            $query->where('status', $validated['status']);
+        }
+
+        if (!empty($validated['book_id'])) {
+            $query->where('book_id', $validated['book_id']);
+        }
+
+        if (!empty($validated['customer_account'])) {
+            $query->where('customer_account', $validated['customer_account']);
+        }
+
+        if (!empty($validated['phone'])) {
+            $query->where('phone', $validated['phone']);
+        }
+
+        if (!empty($validated['dy_reference_id'])) {
+            $query->where('dy_reference_id', $validated['dy_reference_id']);
+        }
+
+        if (!empty($validated['payment_reference_id'])) {
+            $query->where('payment_reference_id', $validated['payment_reference_id']);
+        }
+
+        if (!empty($validated['date_from'])) {
+            $query->whereDate('created_at', '>=', $validated['date_from']);
+        }
+
+        if (!empty($validated['date_to'])) {
+            $query->whereDate('created_at', '<=', $validated['date_to']);
+        }
+
+        if (!empty($validated['search'])) {
+            $term = $validated['search'];
+            $query->where(function ($q) use ($term) {
+                $q->where('book_id', 'like', "%{$term}%")
+                    ->orWhere('customer_account', 'like', "%{$term}%")
+                    ->orWhere('phone', 'like', "%{$term}%")
+                    ->orWhere('dy_reference_id', 'like', "%{$term}%")
+                    ->orWhere('payment_reference_id', 'like', "%{$term}%");
+            });
+        }
+
+        $sortBy        = $validated['sort_by'] ?? 'created_at';
+        $sortDirection = $validated['sort_direction'] ?? 'desc';
+        $query->orderBy($sortBy, $sortDirection);
+
+        $perPage = $validated['per_page'] ?? 20;
+
+        return response()->json($query->paginate($perPage));
     }
 
     // Tabby success

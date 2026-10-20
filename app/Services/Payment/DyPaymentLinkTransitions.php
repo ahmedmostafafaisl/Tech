@@ -37,10 +37,10 @@ final class DyPaymentLinkTransitions
                 'PaymentLinkId'   => $link->dy_reference_id,
                 'PaymentStatus'   => $status,
                 'ReferenceId'     => $link->payment_reference_id,
-                'customeraccount' => $link->customer_account,
+                'custAccount' => $link->customer_account,
                 'bookId'          => $link->book_id,
-                'Paymode'         => $link->payment_method,
-                'PaimentAmount'   => $link->amount,
+                'paymMode'         => $link->payment_method,
+                'paidAmount'   => $link->amount,
             ],
         ];
 

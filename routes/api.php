@@ -266,19 +266,12 @@ Route::middleware('auth:sanctum')->prefix('user-stock')->group(function () {
 });
 
 // Task routes
-// index/store/destroy: listing every task, creating one (assigning it to a technician), and deleting one
-// are management actions, not something a technician does for themselves — admin-only. show/update stay
-// auth:sanctum and are instead ownership-checked inside the controller (the assigned technician can view
-// and update their own task; getTechnicianTasks() below is the pre-existing self-service list).
-Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('tasks')->group(function () {
+Route::middleware('auth:sanctum')->prefix('tasks')->group(function () {
     Route::get('/', [TaskController::class, 'index']);
     Route::post('/', [TaskController::class, 'store']);
-    Route::delete('/{id}', [TaskController::class, 'destroy']);
-});
-
-Route::middleware('auth:sanctum')->prefix('tasks')->group(function () {
     Route::get('/{id}', [TaskController::class, 'show']);
     Route::put('/{id}', [TaskController::class, 'update']);
+    Route::delete('/{id}', [TaskController::class, 'destroy']);
     Route::get('/technician/tasks', [TaskController::class, 'getTechnicianTasks']);
 });
 
@@ -425,6 +418,10 @@ Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('dy365')->
     Route::get('/sync/technician/change-status-requests', [AppointmentChangeStatusRequestController::class, 'syncAllTechnicianChangeStatusRequests']);
 });
 Route::post('dy365/payments/links', [DyController::class, 'getPaymentLinks']);
+
+// Browses every customer's payment links, not a single technician's or customer's own data — admin-only,
+// unlike the public, rate-limited endpoint above (which DY365 itself calls to create a link).
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('dy365/payments/links', [DyController::class, 'listPaymentLinks']);
 
 Route::get('/tabby/success/reference_id={reference_id}/payment_method={payment_method}', [DyController::class, 'success'])->name('dy.tabby.success');
 Route::get('/tabby/cancel/reference_id={reference_id}/payment_method={payment_method}', [DyController::class, 'cancel'])->name('dy.tabby.cancel');
@@ -807,14 +804,8 @@ Route::middleware('auth:sanctum')->prefix('dashboard')->group(function () {
     Route::get('evaluation-messages/phone/{phone}', [EvaluationMessageController::class, 'getByPhone']);
 });
 
-// index: browsing every technician's timeout logs — admin-only; previously reachable by any authenticated
-// user. store/update stay auth:sanctum: store() now derives tech_id from the caller rather than trusting
-// the body, and update() is ownership-checked inside the controller.
-Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('timeout-logs')->group(function () {
-    Route::get('/', [TimeOutLogController::class, 'index']);
-});
-
 Route::middleware('auth:sanctum')->prefix('timeout-logs')->group(function () {
+    Route::get('/', [TimeOutLogController::class, 'index']);
     Route::post('/update', [TimeOutLogController::class, 'update']);
     Route::post('/', [TimeOutLogController::class, 'store']);
 });
@@ -934,15 +925,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/change-customer-name', [NewDirectIntegrationController::class, 'changeCustomerName']);
     // add registration number to
     Route::post('/add-registration-number', [NewDirectIntegrationController::class, 'addRegistrationNumber']);
-    // resend attachment
-    Route::post('/appointments/resend-attachments', [CompleteFormController::class, 'resendAttachmentsToDynamicsByBookId']);
-});
-
-// Browsing every technician's DY365 integration logs (including error messages), filterable by any
-// tech_id — admin-only; previously reachable by any authenticated user.
-Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->group(function () {
     Route::get('/technician-appointment-logs', [TechnicianAppointmentLogController::class, 'index']);
     Route::get('/technician-appointment-logs/book/{book_id}', [TechnicianAppointmentLogController::class, 'byBookId']);
+    // resend attachment
+    Route::post('/appointments/resend-attachments', [CompleteFormController::class, 'resendAttachmentsToDynamicsByBookId']);
 });
 
 // appointment cooldown  timer
