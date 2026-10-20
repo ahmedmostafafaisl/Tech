@@ -283,6 +283,60 @@ class NewDirectIntegrationController extends Controller
         return Storage::disk('s3')->url($path);
     }
 
+    /**
+     * On-demand targeted check: fetches ONE appointment's current DY365 status and, if it's now
+     * Canceled/Cancelled, releases every serial reserved under it (via CancellationChangeRequestRecorder —
+     * the same auto-ChangeRequest logic singleAppointmentByBookId/mainWarehouse already trigger
+     * opportunistically). Exists so a caller who's just seen a serial's reserved_serials array doesn't have
+     * to separately open that OTHER appointment's own detail view to find out whether it's actually been
+     * cancelled — this checks and releases it directly, in one call.
+     *
+     * This is the only place in this flow that makes a live DY365 call on purpose, and only because the
+     * caller explicitly asked for this one specific book_id — never as part of browsing or listing serials.
+     */
+    public function checkAppointmentCancellation(string $bookId)
+    {
+        $response = $this->dyService->getAppointmentByBookIdNew($bookId, 0);
+
+        if ($response === null) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Dynamics is unavailable right now. Please try again.',
+            ], 503);
+        }
+
+        if (! ($response['Status'] ?? false) || ! isset($response['Data'])) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Invalid appointment response.',
+            ], 400);
+        }
+
+        $appointmentData = $response['Data'];
+        $outcome = \App\Services\Serials\CancellationChangeRequestRecorder::recordIfCancelled($bookId, $appointmentData);
+
+        return match ($outcome) {
+            'recorded' => response()->json([
+                'status' => true,
+                'cancelled' => true,
+                'released' => true,
+                'message' => 'Appointment is cancelled in Dynamics — its reserved serials have been released.',
+            ]),
+            'already_recorded' => response()->json([
+                'status' => true,
+                'cancelled' => true,
+                'released' => true,
+                'message' => 'Appointment was already recorded as cancelled — its reserved serials were already released.',
+            ]),
+            default => response()->json([
+                'status' => true,
+                'cancelled' => false,
+                'released' => false,
+                'message' => 'Appointment is still active in Dynamics — its serials remain reserved.',
+            ]),
+        };
+    }
+
     public function singleAppointmentByBookId($bookId)
     {
         $response = $this->dyService->getAppointmentByBookIdNew($bookId, 0);
@@ -319,6 +373,12 @@ class NewDirectIntegrationController extends Controller
         // consumed, not picks: they are hidden too, whatever the age (they stay in selected_serials).
         // Skipped when no line is serial.
         $usedSerialsByItem = [];
+        // lower-cased item_number => [[serial, book_id], ...] — every serial of this item reserved under a
+        // DIFFERENT appointment (with no ChangeRequest), exposed in the response below as reserved_serials
+        // so the caller can see exactly what's hidden and under which book_id, without needing to visit
+        // that other appointment directly to find out. See /integration/appointments/{book_id}/check-cancellation
+        // for the endpoint that lets a caller act on one of these.
+        $reservedByItem = [];
         $serialItemNumbers = collect($salesLines)
             ->filter(fn($l) => (bool) ($l['IsSerial'] ?? false))
             ->pluck('ItemNumber')
@@ -341,9 +401,13 @@ class NewDirectIntegrationController extends Controller
             // for reasons unrelated to the sale itself. Backed by an indexed lookup table populated once at
             // completion time (see TransmittedSerialIndexer), never a live dy_body parse, so this stays fast
             // regardless of how many appointments exist.
+            $reservedByItem = \App\Services\Serials\PermanentlyTransmittedSerials::reservedBookIdsByItem(
+                (string) $bookId,
+                $serialItemNumbers
+            );
             $usedSerialsByItem = \App\Services\Serials\UsedSerialWindow::mergeByItem(
                 $usedSerialsByItem,
-                $this->permanentlyTransmittedSerialsByItem((string) $bookId, $serialItemNumbers)
+                collect($reservedByItem)->map(fn($serialToBookId) => array_keys($serialToBookId))->all()
             );
         }
 
@@ -381,7 +445,7 @@ class NewDirectIntegrationController extends Controller
         }, collect());
 
         // ✅ Map sales lines with max_quantity, serial data, bundle_id and bundle_name
-        $salesLines = array_map(function ($line) use ($stockMap, $bundleItemMap, $usedSerialsByItem) {
+        $salesLines = array_map(function ($line) use ($stockMap, $bundleItemMap, $usedSerialsByItem, $reservedByItem) {
             $itemNumber = strtolower($line['ItemNumber'] ?? '');
             $bundleEntry = $bundleItemMap->get($itemNumber);
 
@@ -393,6 +457,13 @@ class NewDirectIntegrationController extends Controller
                 $line['available_serials'] ?? [],
                 $usedSerialsByItem[strtolower(trim($line['ItemNumber'] ?? ''))] ?? []
             );
+            // Which of this item's serials are hidden, and under which OTHER book_id each is reserved — so
+            // a caller can see what's missing and, if that other appointment turns out to be cancelled in
+            // DY365, release it via /integration/appointments/{book_id}/check-cancellation.
+            $line['reserved_serials'] = collect($reservedByItem[strtolower(trim($line['ItemNumber'] ?? ''))] ?? [])
+                ->map(fn($reservingBookId, $serial) => ['serial' => $serial, 'book_id' => $reservingBookId])
+                ->values()
+                ->all();
             $line['bundle_id'] = $bundleEntry['bundle_id'] ?? null;
             $line['bundle_name'] = $bundleEntry['bundle_name'] ?? null;
 
@@ -969,17 +1040,27 @@ class NewDirectIntegrationController extends Controller
          * time-windowed "picked by this technician today" rule instead, which (like the bug fixed on
          * singleAppointmentByBookId) could hide a serial that was never actually sent anywhere.
          */
-        $todayReservedSerials = \App\Services\Serials\PermanentlyTransmittedSerials::reservedSerialsByItem(
+        // reservedByItem carries the reserving book_id per serial, not just the serial list — exposed below
+        // as each product's own reserved_serials, so a caller can see what's hidden and under which other
+        // appointment, and release it via /integration/appointments/{book_id}/check-cancellation if that
+        // appointment turns out to be cancelled in DY365.
+        $reservedByItem = \App\Services\Serials\PermanentlyTransmittedSerials::reservedBookIdsByItem(
             null,
             collect($products)->pluck('ItemNumber')->filter()->unique()->values()->all()
         );
+        $todayReservedSerials = collect($reservedByItem)->map(fn($serialToBookId) => array_keys($serialToBookId))->all();
 
         /**
          * Remove reserved serials from warehouse products
          */
-        $products = collect($products)->map(function ($product) use ($todayReservedSerials, $cleanSerial) {
+        $products = collect($products)->map(function ($product) use ($todayReservedSerials, $reservedByItem, $cleanSerial) {
 
             $itemNumber = strtolower(trim($product['ItemNumber'] ?? ''));
+
+            $product['reserved_serials'] = collect($reservedByItem[$itemNumber] ?? [])
+                ->map(fn($reservingBookId, $serial) => ['serial' => $serial, 'book_id' => $reservingBookId])
+                ->values()
+                ->all();
 
             if (
                 isset($todayReservedSerials[$itemNumber]) &&

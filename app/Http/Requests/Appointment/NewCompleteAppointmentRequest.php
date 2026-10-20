@@ -117,6 +117,13 @@ class NewCompleteAppointmentRequest extends FormRequest
 
                 $reservedByItem = \App\Services\Serials\PermanentlyTransmittedSerials::reservedBookIdsByItem($bookId, $itemNumbers);
 
+                // Submission time only (never the browsing endpoints) — for the handful of serials that
+                // would otherwise be rejected here, checks live whether the reserving appointment has since
+                // been cancelled in DY365 with no ChangeRequest ever recorded for it, and releases it on the
+                // spot if so. Off unless explicitly enabled (settings key
+                // serial_live_cancellation_check_active) — see ReservedSerialLiveVerifier.
+                $reservedByItem = \App\Services\Serials\ReservedSerialLiveVerifier::releaseCancelledReservations($reservedByItem);
+
                 foreach ($this->input('items', []) as $index => $item) {
                     $serials = $item['serials'] ?? [];
 

@@ -24,17 +24,18 @@ class CancellationChangeRequestRecorder
      * @param  string  $bookId  the appointment whose live DY365 data was just fetched
      * @param  array|null  $appointmentData  the 'Data' object from that DY365 response (not the whole
      *                                       envelope) — null or missing Status is simply ignored
+     * @return string 'not_cancelled' | 'already_recorded' | 'recorded'
      */
-    public static function recordIfCancelled(string $bookId, ?array $appointmentData): void
+    public static function recordIfCancelled(string $bookId, ?array $appointmentData): string
     {
         if (! in_array($appointmentData['Status'] ?? null, self::CANCELLED_STATUSES, true)) {
-            return;
+            return 'not_cancelled';
         }
 
         // Already recorded — this is what makes every later lookup free of a DY365 call: once recorded, the
         // plain ChangeRequest-exists check this row satisfies is what PermanentlyTransmittedSerials reads.
         if (ChangeRequest::where('book_id', $bookId)->exists()) {
-            return;
+            return 'already_recorded';
         }
 
         ChangeRequest::create([
@@ -47,5 +48,7 @@ class CancellationChangeRequestRecorder
             'request_type'   => false,
             'notes'          => 'Auto-recorded: DY365 reports this appointment as ' . $appointmentData['Status'] . '.',
         ]);
+
+        return 'recorded';
     }
 }

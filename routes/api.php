@@ -660,6 +660,11 @@ Route::middleware('auth:sanctum')->prefix('new')->group(function () {
     Route::get('/integration/single-appointment/{sales_order_id}', [NewDirectIntegrationController::class, 'singleAppointment']);
     Route::get('/integration/single2-appointment/{sales_order_id}', [NewDirectIntegrationController::class, 'singleAppointment2']);
     Route::get('/integration/single3-appointment/{book_id}', [NewDirectIntegrationController::class, 'singleAppointmentByBookId']);
+
+    // Targeted, on-demand check: fetches this one appointment's live DY365 status and releases its reserved
+    // serials if it's now cancelled — see each line's/product's reserved_serials array (single3-appointment,
+    // main-warehouse) for which book_id to pass here.
+    Route::post('/integration/appointments/{book_id}/check-cancellation', [NewDirectIntegrationController::class, 'checkAppointmentCancellation']);
     Route::post('/integration/tech-warehouse', [NewDirectIntegrationController::class, 'techWarehouse']);
     Route::post('/integration/main-warehouse', [NewDirectIntegrationController::class, 'mainWarehouse']);
     // product limit
