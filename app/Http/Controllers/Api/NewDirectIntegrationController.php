@@ -997,7 +997,7 @@ class NewDirectIntegrationController extends Controller
         })->toArray();
 
         // Update response with cleaned and filtered serials
-        return   $warehouseResponse['Data']['Products'] = $products;
+        $warehouseResponse['Data']['Products'] = $products;
 
         if (empty($request->bookId)) {
             $filteredProducts = $products;
