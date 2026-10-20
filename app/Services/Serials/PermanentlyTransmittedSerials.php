@@ -55,12 +55,20 @@ class PermanentlyTransmittedSerials
             return [];
         }
 
-        // item_number filtering happens in PHP, not SQL: item_number case varies between callers (DY365
-        // responses, request bodies) and what's stored here, and the grouping below already normalizes to
-        // lower-case — an SQL whereIn on the raw, differently-cased values would silently drop matching
-        // rows instead of finding them.
+        // Grouping below normalizes every item_number to lower-case, so the final result is correct
+        // regardless of casing either way — this is purely about what the database is asked to filter by.
         $normalizedItemNumbers = $itemNumbers !== null
             ? collect($itemNumbers)->map(fn($i) => strtolower(trim((string) $i)))->all()
+            : null;
+
+        // The SQL-level item_number filter was previously removed entirely (moved to PHP only), to work
+
+        $itemNumberCandidates = $itemNumbers !== null
+            ? collect($itemNumbers)
+            ->flatMap(fn($i) => [(string) $i, strtolower(trim((string) $i)), strtoupper(trim((string) $i))])
+            ->unique()
+            ->values()
+            ->all()
             : null;
 
         // Previously fetched every book_id that has EVER had a ChangeRequest into a PHP array, then used
@@ -69,14 +77,26 @@ class PermanentlyTransmittedSerials
         // outright on every call. whereNotExists() checks the same condition as a subquery instead, with no
         // array binding at all, so it stays correct regardless of how large change_requests grows.
         $rows = TransmittedSerial::query()
-            ->select('item_number', 'serial', 'book_id')
-            ->when($exceptBookId !== null, fn($q) => $q->where('book_id', '!=', $exceptBookId))
-            ->whereNotExists(function ($query) {
-                $query->selectRaw('1')
-                    ->from('change_requests')
-                    ->whereColumn('change_requests.book_id', 'transmitted_serials.book_id')
-                    ->whereNotNull('change_requests.book_id');
-            })
+            ->leftJoin(
+                'change_requests as cr',
+                'cr.book_id',
+                '=',
+                'transmitted_serials.book_id'
+            )
+            ->select(
+                'transmitted_serials.item_number',
+                'transmitted_serials.serial',
+                'transmitted_serials.book_id'
+            )
+            ->when(
+                $exceptBookId !== null,
+                fn($q) => $q->where('transmitted_serials.book_id', '!=', $exceptBookId)
+            )
+            ->when(
+                $itemNumberCandidates !== null,
+                fn($q) => $q->whereIn('transmitted_serials.item_number', $itemNumberCandidates)
+            )
+            ->whereNull('cr.book_id')
             ->get();
 
         $cancelledBookIds = self::liveCancelledBookIds($rows->pluck('book_id')->unique()->values());

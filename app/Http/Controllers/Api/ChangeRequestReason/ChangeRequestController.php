@@ -32,9 +32,9 @@ class ChangeRequestController extends Controller
             $changeRequest = ChangeRequest::updateOrCreate(
                 [
                     'book_id'        => $validated['book_id'],
-                    'sales_order_id' => $validated['sales_order_id'],
                 ],
                 [
+                    'sales_order_id' => $validated['sales_order_id'],
                     'tech_id'       => $validated['tech_id'],
                     'request_type'  => $validated['request_type'],
                     'reason_rec_id' => $validated['reason_rec_id'] ?? null,
