@@ -337,6 +337,74 @@ class NewDirectIntegrationController extends Controller
         };
     }
 
+    /**
+     * Lightweight, dedicated version of what singleAppointmentByBookId used to include inline: this
+     * appointment's serial-tracked items, each with its own reserved_serials — which of its serials are
+     * currently hidden elsewhere, and under which other book_id. Separated out so the main appointment
+     * response doesn't carry this detail on every call; a caller who specifically wants it (e.g. to decide
+     * whether to try /integration/appointments/{book_id}/check-cancellation on one of the listed book_ids)
+     * calls this instead.
+     */
+    public function reservedSerialsForAppointment(string $bookId)
+    {
+        $response = $this->dyService->getAppointmentByBookIdNew($bookId, 0);
+
+        if ($response === null) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Dynamics is unavailable right now. Please try again.',
+            ], 503);
+        }
+
+        if (! ($response['Status'] ?? false) || ! isset($response['Data'])) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Invalid appointment response.',
+            ], 400);
+        }
+
+        $salesLines = $response['Data']['SalesLines'] ?? [];
+        $salesLines = is_array($salesLines) ? $salesLines : [];
+
+        $serialItemNumbers = collect($salesLines)
+            ->filter(fn($l) => (bool) ($l['IsSerial'] ?? false))
+            ->pluck('ItemNumber')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $reservedByItem = $serialItemNumbers !== []
+            ? \App\Services\Serials\PermanentlyTransmittedSerials::reservedBookIdsByItem($bookId, $serialItemNumbers)
+            : [];
+
+        $items = collect($salesLines)
+            ->filter(fn($l) => (bool) ($l['IsSerial'] ?? false))
+            ->map(function ($line) use ($reservedByItem) {
+                $itemNumber = strtolower(trim($line['ItemNumber'] ?? ''));
+
+                return [
+                    'ItemNumber' => $line['ItemNumber'] ?? null,
+                    'SaleslineId' => $line['SaleslineId'] ?? null,
+                    'Quantity' => $line['Quantity'] ?? null,
+                    'reserved_serials' => collect($reservedByItem[$itemNumber] ?? [])
+                        ->map(fn($reservingBookId, $serial) => ['serial' => $serial, 'book_id' => $reservingBookId])
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'book_id' => $bookId,
+                'items' => $items,
+            ],
+        ]);
+    }
+
     public function singleAppointmentByBookId($bookId)
     {
         $response = $this->dyService->getAppointmentByBookIdNew($bookId, 0);
@@ -373,11 +441,11 @@ class NewDirectIntegrationController extends Controller
         // consumed, not picks: they are hidden too, whatever the age (they stay in selected_serials).
         // Skipped when no line is serial.
         $usedSerialsByItem = [];
-        // lower-cased item_number => [[serial, book_id], ...] — every serial of this item reserved under a
-        // DIFFERENT appointment (with no ChangeRequest), exposed in the response below as reserved_serials
-        // so the caller can see exactly what's hidden and under which book_id, without needing to visit
-        // that other appointment directly to find out. See /integration/appointments/{book_id}/check-cancellation
-        // for the endpoint that lets a caller act on one of these.
+        // lower-cased item_number => [serial => reserving book_id] — used below only to decide what
+        // available_serials hides (and, with serial_live_cancellation_check_active on, what it skips hiding
+        // entirely). The detail itself (which book_id each serial is reserved under) is no longer exposed
+        // here — see reservedSerialsForAppointment() / GET /integration/appointments/{book_id}/reserved-serials
+        // for that, and /integration/appointments/{book_id}/check-cancellation to act on one.
         $reservedByItem = [];
         $serialItemNumbers = collect($salesLines)
             ->filter(fn($l) => (bool) ($l['IsSerial'] ?? false))
@@ -453,7 +521,7 @@ class NewDirectIntegrationController extends Controller
         }, collect());
 
         // ✅ Map sales lines with max_quantity, serial data, bundle_id and bundle_name
-        $salesLines = array_map(function ($line) use ($stockMap, $bundleItemMap, $usedSerialsByItem, $reservedByItem) {
+        $salesLines = array_map(function ($line) use ($stockMap, $bundleItemMap, $usedSerialsByItem) {
             $itemNumber = strtolower($line['ItemNumber'] ?? '');
             $bundleEntry = $bundleItemMap->get($itemNumber);
 
@@ -465,13 +533,8 @@ class NewDirectIntegrationController extends Controller
                 $line['available_serials'] ?? [],
                 $usedSerialsByItem[strtolower(trim($line['ItemNumber'] ?? ''))] ?? []
             );
-            // Which of this item's serials are hidden, and under which OTHER book_id each is reserved — so
-            // a caller can see what's missing and, if that other appointment turns out to be cancelled in
-            // DY365, release it via /integration/appointments/{book_id}/check-cancellation.
-            $line['reserved_serials'] = collect($reservedByItem[strtolower(trim($line['ItemNumber'] ?? ''))] ?? [])
-                ->map(fn($reservingBookId, $serial) => ['serial' => $serial, 'book_id' => $reservingBookId])
-                ->values()
-                ->all();
+            // reserved_serials was here before — moved to its own dedicated endpoint, see
+            // reservedSerialsForAppointment() / GET /integration/appointments/{book_id}/reserved-serials.
             $line['bundle_id'] = $bundleEntry['bundle_id'] ?? null;
             $line['bundle_name'] = $bundleEntry['bundle_name'] ?? null;
 
