@@ -197,7 +197,14 @@ class SendPaymentLinksRequest extends FormRequest
             // duplicated its own, different, time-windowed "same technician, picked today" check — which
             // could reject a serial the appointment API was still showing as selectable, since neither
             // definition agreed with the other.
-            if ($bookId) {
+            //
+            // Whole check is skippable via settings key serial_reuse_validation_active (default: ON — this
+            // is an existing safety check, so a missing setting row must never silently disable it). Off
+            // means every submitted serial is accepted here regardless of reservation status, with no
+            // PermanentlyTransmittedSerials or ReservedSerialLiveVerifier call made at all — distinct from
+            // serial_live_cancellation_check_active, which only controls the live-release behavior WITHIN
+            // this same check, not whether the check itself runs.
+            if ($bookId && \App\Models\Setting::isActive('serial_reuse_validation_active', true)) {
                 $itemNumbers = collect($this->input('items', []))
                     ->pluck('ItemNumber')
                     ->filter()

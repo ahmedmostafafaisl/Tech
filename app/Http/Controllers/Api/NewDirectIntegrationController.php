@@ -1111,10 +1111,8 @@ class NewDirectIntegrationController extends Controller
          * time-windowed "picked by this technician today" rule instead, which (like the bug fixed on
          * singleAppointmentByBookId) could hide a serial that was never actually sent anywhere.
          */
-        // reservedByItem carries the reserving book_id per serial, not just the serial list — exposed below
-        // as each product's own reserved_serials, so a caller can see what's hidden and under which other
-        // appointment, and release it via /integration/appointments/{book_id}/check-cancellation if that
-        // appointment turns out to be cancelled in DY365.
+        // Not exposed in the response (see GET /integration/appointments/{book_id}/reserved-serials for
+        // that, on a per-appointment basis) — used here only to decide what gets removed below.
         $reservedByItem = \App\Services\Serials\PermanentlyTransmittedSerials::reservedBookIdsByItem(
             null,
             collect($products)->pluck('ItemNumber')->filter()->unique()->values()->all()
@@ -1124,20 +1122,15 @@ class NewDirectIntegrationController extends Controller
         // When the submission-time live check is on (settings key
         // serial_live_cancellation_check_active), a reservation here would only ever be a FALSE positive the
         // submit endpoints would release anyway — so the rejection below is skipped entirely, and every
-        // serial is returned. reserved_serials still reflects the raw reservation data either way.
+        // serial is returned.
         $skipReservationFilter = \App\Models\Setting::isActive('serial_live_cancellation_check_active', false);
 
         /**
          * Remove reserved serials from warehouse products
          */
-        $products = collect($products)->map(function ($product) use ($todayReservedSerials, $reservedByItem, $cleanSerial, $skipReservationFilter) {
+        $products = collect($products)->map(function ($product) use ($todayReservedSerials, $cleanSerial, $skipReservationFilter) {
 
             $itemNumber = strtolower(trim($product['ItemNumber'] ?? ''));
-
-            $product['reserved_serials'] = collect($reservedByItem[$itemNumber] ?? [])
-                ->map(fn($reservingBookId, $serial) => ['serial' => $serial, 'book_id' => $reservingBookId])
-                ->values()
-                ->all();
 
             if (
                 ! $skipReservationFilter &&
