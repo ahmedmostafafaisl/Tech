@@ -405,10 +405,18 @@ class NewDirectIntegrationController extends Controller
                 (string) $bookId,
                 $serialItemNumbers
             );
-            $usedSerialsByItem = \App\Services\Serials\UsedSerialWindow::mergeByItem(
-                $usedSerialsByItem,
-                collect($reservedByItem)->map(fn($serialToBookId) => array_keys($serialToBookId))->all()
-            );
+
+            // When the submission-time live check is on (settings key
+            // serial_live_cancellation_check_active), a reservation here would only ever be a FALSE
+            // positive the submit endpoints would release anyway — so this filter is skipped entirely here,
+            // and every serial is shown. reserved_serials below still reflects the raw reservation data
+            // either way, for visibility into what WOULD be hidden with the setting off.
+            if (! \App\Models\Setting::isActive('serial_live_cancellation_check_active', false)) {
+                $usedSerialsByItem = \App\Services\Serials\UsedSerialWindow::mergeByItem(
+                    $usedSerialsByItem,
+                    collect($reservedByItem)->map(fn($serialToBookId) => array_keys($serialToBookId))->all()
+                );
+            }
         }
 
         // ✅ Appointment bundles by book_id
@@ -1050,10 +1058,16 @@ class NewDirectIntegrationController extends Controller
         );
         $todayReservedSerials = collect($reservedByItem)->map(fn($serialToBookId) => array_keys($serialToBookId))->all();
 
+        // When the submission-time live check is on (settings key
+        // serial_live_cancellation_check_active), a reservation here would only ever be a FALSE positive the
+        // submit endpoints would release anyway — so the rejection below is skipped entirely, and every
+        // serial is returned. reserved_serials still reflects the raw reservation data either way.
+        $skipReservationFilter = \App\Models\Setting::isActive('serial_live_cancellation_check_active', false);
+
         /**
          * Remove reserved serials from warehouse products
          */
-        $products = collect($products)->map(function ($product) use ($todayReservedSerials, $reservedByItem, $cleanSerial) {
+        $products = collect($products)->map(function ($product) use ($todayReservedSerials, $reservedByItem, $cleanSerial, $skipReservationFilter) {
 
             $itemNumber = strtolower(trim($product['ItemNumber'] ?? ''));
 
@@ -1063,6 +1077,7 @@ class NewDirectIntegrationController extends Controller
                 ->all();
 
             if (
+                ! $skipReservationFilter &&
                 isset($todayReservedSerials[$itemNumber]) &&
                 ! empty($product['ProductsPerSerial']) &&
                 is_array($product['ProductsPerSerial'])
