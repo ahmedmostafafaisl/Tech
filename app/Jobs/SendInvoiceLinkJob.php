@@ -151,9 +151,21 @@ class SendInvoiceLinkJob implements ShouldQueue
             return false;
         }
 
-        // Second body parameter only when there's an evaluation link to send — the approved template's own
-        // parameter count must match whichever of these is actually sent.
-        $bodyParameters = $evaluationLink !== null ? [$shortUrl, $evaluationLink] : [$shortUrl];
+        // The approved template is bilingual with 4 DISTINCT variables, not 2 reused ones: {{1}}/{{2}} for
+        // the Arabic section, {{3}}/{{4}} for the English section repeating the same two links — deliberate,
+        // so neither language's slot is ever filled by assuming the other's position. Meta requires every
+        // declared variable to be filled, so without an evaluation link this template can't be sent at all
+        // (there's no sensible value for {{2}}/{{4}}) — WhatsApp is skipped in that case; SMS still falls
+        // back to its own, separate invoice-only message independently.
+        if ($evaluationLink === null) {
+            Log::warning('SendInvoiceLinkJob: WhatsApp send skipped — template requires an evaluation link and none resolved', [
+                'book_id' => $this->bookId,
+                'phone' => $this->phone,
+            ]);
+            return false;
+        }
+
+        $bodyParameters = [$shortUrl, $evaluationLink, $shortUrl, $evaluationLink];
 
         try {
             $response = $whatsAppService->sendTemplateMessage($this->phone, $templateName, $bodyParameters);
