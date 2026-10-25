@@ -32,6 +32,8 @@ class Kernel extends ConsoleKernel
         // $schedule->command('reports:send-daily-confirmed-export-links')->timezone('Asia/Riyadh')->dailyAt('09:00')->unlessEmergency();
 
         $schedule->job(new \App\Jobs\GenerateMonthlyPreMessagesExportLink())->timezone('Asia/Riyadh')->dailyAt('04:00')->unlessEmergency();
+
+        $schedule->command('invoices:retry-pending-links')->timezone('Asia/Riyadh')->dailyAt('05:00')->withoutOverlapping();
     }
 
     /**
@@ -83,5 +85,6 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\ResendEvaluationMessages::class,
         \App\Console\Commands\SendDailyConfirmedExportLinks::class,
         \App\Console\Commands\BackfillTransmittedSerialsCommand::class,
+        \App\Console\Commands\RetryPendingInvoiceLinksCommand::class,
     ];
 }

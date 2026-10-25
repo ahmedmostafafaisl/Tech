@@ -490,6 +490,9 @@ Route::prefix('clickpay')->group(function () {
     Route::post('/callback', [ClickPayController::class, 'handleCallback'])->name('clickpay.callback');
     Route::match(['get', 'post'], '/return', [ClickPayController::class, 'handleReturn'])->name('clickpay.return');
     Route::match(['get', 'post'], '/return-dy', [ClickPayController::class, 'dyHandleReturn'])->name('dy.clickpay.return');
+    // Server-to-server confirmation for the DY payment-link flow — see dyCreateInvoice()'s 'callback' URL
+    // and dyHandleCallback()'s own docblock for why /callback (above) doesn't work for this.
+    Route::post('/callback-dy', [ClickPayController::class, 'dyHandleCallback'])->name('dy.clickpay.callback');
 });
 
 // Route::prefix('clickpay')->group(function () {

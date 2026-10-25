@@ -246,7 +246,13 @@ class ClickPayService
                 'zip'      => $data['zip'] ?? '54321',
                 'ip'       => request()->ip() ?? '2.2.2.2',
             ],
-            'callback' => $this->publicUrl . '/api/clickpay/callback?' . http_build_query([
+            // Previously /api/clickpay/callback — that route's handler (handleCallback) looks up a
+            // completely different model (ClickPayPayment, a legacy flow unrelated to DyPaymentLink), so it
+            // silently did nothing for a DY payment link; completion depended entirely on the customer's
+            // browser completing the return redirect below, with no fallback if that failed. This points at
+            // ClickPayController::dyHandleCallback instead, which shares the same verification/completion
+            // logic as the return handler.
+            'callback' => $this->publicUrl . '/api/clickpay/callback-dy?' . http_build_query([
                 'reference_id' => $payment['reference_id'],
                 'payment_type' => $payment['payment_type'],
                 'type' => 'dy',

@@ -379,29 +379,93 @@ class ClickPayController extends Controller
             ]);
         }
 
+        $result = $this->verifyAndCompleteDyClickPayLink($payment);
+
+        if ($result['outcome'] === 'unexpected_error') {
+            return response()->json(['status' => 'error', 'message' => 'The payment was verified but could not be recorded. Please refresh to try again.'], 502);
+        }
+
+        return $this->dyReturnView($result['payment'], $result['outcome'] === 'paid' ? 'paid' : 'failed');
+    }
+
+    /**
+     * Server-to-server confirmation for ClickPay in the DY payment-link flow — the `callback` URL
+     * ClickPayService::dyCreateInvoice() sets. Previously this pointed at /api/clickpay/callback
+     * (handleCallback), which looks up a completely different model (ClickPayPayment, a legacy flow
+     * unrelated to DyPaymentLink) — so it silently did nothing for a DY payment link. That left DY payment
+     * links completing ONLY if the customer's browser successfully completed the return redirect
+     * (dyHandleReturn) — closing the tab, losing connection, or any other redirect failure left a genuinely
+     * paid payment stuck at 'created' forever, with nothing to catch it. This gives ClickPay a real,
+     * independent-of-the-browser way to confirm the payment, the same way Tamara's webhook already does.
+     *
+     * Shares verifyAndCompleteDyClickPayLink() with dyHandleReturn() — same verification and completion
+     * logic either way, differing only in what gets returned (JSON here, a view there).
+     */
+    public function dyHandleCallback(Request $request)
+    {
+        $referenceId = $request->input('reference_id');
+
+        if (!$referenceId) {
+            return response()->json(['status' => false, 'message' => 'Missing reference_id'], 400);
+        }
+
+        $payment = DyPaymentLink::where('payment_method', 'clickpay')
+            ->where('dy_reference_id', $referenceId)
+            ->first();
+
+        if (!$payment) {
+            Log::warning('ClickPay DY callback: local payment link not found.', ['dy_reference_id' => $referenceId]);
+
+            return response()->json(['status' => true, 'message' => 'Ignored — payment link not found']);
+        }
+
+        $result = $this->verifyAndCompleteDyClickPayLink($payment);
+
+        if ($result['outcome'] === 'unexpected_error') {
+            return response()->json(['status' => false, 'message' => 'Payment verified but could not be recorded'], 500);
+        }
+
+        return response()->json(['status' => true, 'message' => 'Callback processed', 'outcome' => $result['outcome']]);
+    }
+
+    /**
+     * Queries ClickPay for the real status of this DyPaymentLink, validates it (Authorised, correct
+     * amount/currency), and — only if everything checks out — completes it via the shared
+     * DyPaymentLinkTransitions::complete(), which updates the local record BEFORE notifying DY365 (so a
+     * DY365 outage never leaves a genuinely paid payment stuck, and a 'done_dy_notification_failed' result
+     * is still treated as paid). Used by both dyHandleReturn (browser redirect) and dyHandleCallback (server
+     * callback) so there is exactly one place this verification logic lives.
+     *
+     * @return array{outcome: string, payment: DyPaymentLink} outcome is one of:
+     *   'paid'             — this call (or an earlier one) confirmed and recorded it
+     *   'failed'           — ClickPay did not authorise it, or the reply couldn't be verified/matched
+     *   'unexpected_error' — a genuinely unexpected failure recording it locally (not DY365 refusing it)
+     */
+    private function verifyAndCompleteDyClickPayLink(DyPaymentLink $payment): array
+    {
         // A replay of a payment that is already complete: nothing to verify, nothing to tell DY365 again.
         if (in_array($payment->status, ['paid', 'success'], true)) {
-            return $this->dyReturnView($payment, 'paid');
+            return ['outcome' => 'paid', 'payment' => $payment];
         }
 
         try {
             $data = json_decode(json_encode($this->clickPay->handleReturn($payment->payment_reference_id)), true);
         } catch (\Throwable $e) {
-            Log::error('ClickPay DY return: could not query ClickPay; link left unchanged', [
+            Log::error('ClickPay DY verification: could not query ClickPay; link left unchanged', [
                 'dy_reference_id' => $payment->dy_reference_id,
                 'error'           => $e->getMessage(),
             ]);
 
-            return $this->dyReturnView($payment, 'failed');
+            return ['outcome' => 'failed', 'payment' => $payment];
         }
 
         $message = $data['payment_result']['response_message'] ?? null;
 
         if ($message === null) {
             // no usable answer from ClickPay: change nothing, tell nobody
-            Log::warning('ClickPay DY return: unusable reply; link left unchanged', ['dy_reference_id' => $payment->dy_reference_id]);
+            Log::warning('ClickPay DY verification: unusable reply; link left unchanged', ['dy_reference_id' => $payment->dy_reference_id]);
 
-            return $this->dyReturnView($payment, 'failed');
+            return ['outcome' => 'failed', 'payment' => $payment];
         }
 
         if ($message !== 'Authorised') {
@@ -410,7 +474,7 @@ class ClickPayController extends Controller
                 $payment->update(['status' => 'failed']);
             }
 
-            return $this->dyReturnView($payment->fresh(), 'failed');
+            return ['outcome' => 'failed', 'payment' => $payment->fresh()];
         }
 
         // Authorised: it must also be the amount and currency this link was created for.
@@ -420,50 +484,30 @@ class ClickPayController extends Controller
         if (($charged !== null && (!is_numeric($charged) || abs((float) $charged - (float) $payment->amount) >= 0.005))
             || ($currency !== null && strtoupper((string) $currency) !== 'SAR')
         ) {
-            Log::warning('ClickPay DY return: authorised payment does not match the link amount/currency; link left unchanged', [
+            Log::warning('ClickPay DY verification: authorised payment does not match the link amount/currency; link left unchanged', [
                 'dy_reference_id' => $payment->dy_reference_id,
             ]);
 
-            return $this->dyReturnView($payment, 'failed');
+            return ['outcome' => 'failed', 'payment' => $payment];
         }
 
         try {
-            DB::transaction(function () use ($payment) {
-                $locked = DyPaymentLink::whereKey($payment->id)->lockForUpdate()->first();
-
-                if (in_array($locked->status, ['paid', 'success'], true)) {
-                    return;   // a concurrent or repeated request got here first
-                }
-
-                $reply = app(DyController::class)->handlePaymentStatus($locked, 'Approved');
-
-                if (!DyAcknowledgement::accepted($reply)) {
-                    // A non-null $reply here is DY365's own 200-OK business rejection (Status:false / Error set),
-                    // not a transport failure (those are swallowed and logged separately, to
-                    // storage/logs/dyservice/dyPaymentStatus.log) — until now, logged nowhere at all.
-                    // Log::error('DY365 refused a payment-link status notification', [
-                    //     'dy_reference_id'      => $locked->dy_reference_id,
-                    //     'payment_reference_id' => $locked->payment_reference_id,
-                    //     'requested_status'     => 'Approved',
-                    //     'current_local_status' => $locked->status,
-                    //     'dy_reply'             => $reply,
-                    // ]);
-
-                    throw new \RuntimeException('DY365 did not accept the Approved notification');
-                }
-
-                $locked->update(['status' => 'paid']);
-            });
+            $result = app(\App\Services\Payment\DyPaymentLinkTransitions::class)
+                ->complete($payment, ['status' => 'paid'], 'Approved');
         } catch (\Throwable $e) {
-            // Log::error('ClickPay DY return: DY365 did not accept the notification; link left unchanged', [
-            //     'dy_reference_id' => $payment->dy_reference_id,
-            //     'error'           => $e->getMessage(),
-            // ]);
+            Log::error('ClickPay DY verification: unexpected failure completing the payment locally', [
+                'dy_reference_id' => $payment->dy_reference_id,
+                'error'           => $e->getMessage(),
+            ]);
 
-            return response()->json(['status' => 'error', 'message' => 'The payment was verified but DY365 could not be notified. Please refresh to try again.'], 502);
+            return ['outcome' => 'unexpected_error', 'payment' => $payment];
         }
 
-        return $this->dyReturnView($payment->fresh(), 'paid');
+        // 'done' and 'done_dy_notification_failed' both mean the payment is genuinely paid and recorded
+        // locally; DY365 not acknowledging it is logged inside complete() for separate follow-up.
+        // 'invalid_state' can't actually happen here (OPEN_STATES covers every status this method leaves a
+        // link in before calling complete()), but is treated the same defensively rather than assumed away.
+        return ['outcome' => in_array($result, ['done', 'done_dy_notification_failed', 'already'], true) ? 'paid' : 'failed', 'payment' => $payment->fresh()];
     }
 
     private function dyReturnView(DyPaymentLink $payment, string $status)

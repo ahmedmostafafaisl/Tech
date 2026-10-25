@@ -288,9 +288,11 @@
                     <tr>
                         <td
                             style="text-align:right; background:#f0f0f0; font-weight:bold; border:1px solid #ccc; padding:4px 6px;">
-                            {{ $labels['total'] ?? 'الاجمالي' }}</td>
+                            {{ $labels['total'] ?? 'الاجمالي' }}
+                        </td>
                         <td style="text-align:center; border:1px solid #ccc; padding:4px 6px; width:90px;">
-                            {{ number_format($invoice['totals']['subtotal'] ?? 0, 2) }}</td>
+                            {{ number_format($invoice['totals']['subtotal'] ?? 0, 2) }}
+                        </td>
                         <td
                             style="text-align:left; background:#f0f0f0; direction:ltr; border:1px solid #ccc; padding:4px 6px; width:140px;">
                             Total Amount</td>
@@ -298,9 +300,11 @@
                     <tr>
                         <td
                             style="text-align:right; background:#f0f0f0; font-weight:bold; border:1px solid #ccc; padding:4px 6px;">
-                            {{ $labels['discount'] ?? 'الخصم' }}</td>
+                            {{ $labels['discount'] ?? 'الخصم' }}
+                        </td>
                         <td style="text-align:center; border:1px solid #ccc; padding:4px 6px;">
-                            {{ number_format($invoice['totals']['discount'] ?? 0, 2) }}</td>
+                            {{ number_format($invoice['totals']['discount'] ?? 0, 2) }}
+                        </td>
                         <td
                             style="text-align:left; background:#f0f0f0; direction:ltr; border:1px solid #ccc; padding:4px 6px;">
                             Discount</td>
@@ -308,9 +312,11 @@
                     <tr>
                         <td
                             style="text-align:right; background:#f0f0f0; font-weight:bold; border:1px solid #ccc; padding:4px 6px;">
-                            {{ $labels['after_discount'] ?? 'الاجمالي بعد الخصم' }}</td>
+                            {{ $labels['after_discount'] ?? 'الاجمالي بعد الخصم' }}
+                        </td>
                         <td style="text-align:center; border:1px solid #ccc; padding:4px 6px;">
-                            {{ number_format($invoice['totals']['after_discount'] ?? 0, 2) }}</td>
+                            {{ number_format($invoice['totals']['after_discount'] ?? 0, 2) }}
+                        </td>
                         <td
                             style="text-align:left; background:#f0f0f0; direction:ltr; border:1px solid #ccc; padding:4px 6px;">
                             Total After Discount</td>
@@ -318,9 +324,11 @@
                     <tr>
                         <td
                             style="text-align:right; background:#f0f0f0; font-weight:bold; border:1px solid #ccc; padding:4px 6px;">
-                            {{ $labels['vat'] ?? 'ضريبة قيمة مضافة %15' }}</td>
+                            {{ $labels['vat'] ?? 'ضريبة قيمة مضافة %15' }}
+                        </td>
                         <td style="text-align:center; border:1px solid #ccc; padding:4px 6px;">
-                            {{ number_format($invoice['totals']['vat'] ?? 0, 2) }}</td>
+                            {{ number_format($invoice['totals']['vat'] ?? 0, 2) }}
+                        </td>
                         <td
                             style="text-align:left; background:#f0f0f0; direction:ltr; border:1px solid #ccc; padding:4px 6px;">
                             VAT 15%</td>
@@ -328,9 +336,11 @@
                     <tr>
                         <td
                             style="text-align:right; background:#f0f0f0; font-weight:bold; border:1px solid #ccc; padding:4px 6px;">
-                            {{ $labels['amount_paid'] ?? 'المبلغ المدفوع' }}</td>
+                            {{ $labels['amount_paid'] ?? 'المبلغ المدفوع' }}
+                        </td>
                         <td style="text-align:center; border:1px solid #ccc; padding:4px 6px;">
-                            {{ number_format($invoice['totals']['amount_paid'] ?? 0, 2) }}</td>
+                            {{ number_format($invoice['totals']['amount_paid'] ?? 0, 2) }}
+                        </td>
                         <td
                             style="text-align:left; background:#f0f0f0; direction:ltr; border:1px solid #ccc; padding:4px 6px;">
                             Amount Paid</td>
@@ -338,9 +348,11 @@
                     <tr>
                         <td
                             style="text-align:right; background:#f0f0f0; font-weight:bold; border:1px solid #ccc; padding:4px 6px;">
-                            {{ $labels['amount_due'] ?? 'المبلغ المستحق' }}</td>
+                            {{ $labels['amount_due'] ?? 'المبلغ المستحق' }}
+                        </td>
                         <td style="text-align:center; border:1px solid #ccc; padding:4px 6px;">
-                            {{ number_format($invoice['totals']['amount_due'] ?? 0, 2) }}</td>
+                            {{ number_format($invoice['totals']['amount_due'] ?? 0, 2) }}
+                        </td>
                         <td
                             style="text-align:left; background:#f0f0f0; direction:ltr; border:1px solid #ccc; padding:4px 6px;">
                             Amount Due</td>
@@ -363,11 +375,19 @@
             </tr>
         </thead>
         <tbody>
-            <tr>
-                <td>{{ $invoice['payment']['ref'] ?? '-' }}</td>
-                <td>{{ $invoice['payment']['mode'] ?? '-' }}</td>
-                <td>{{ number_format($invoice['payment']['value'] ?? 0, 2) }}</td>
-            </tr>
+            @forelse (($invoice['payments'] ?? []) as $index => $paymentRow)
+                <tr>
+                    <td>{{ $paymentRow['ref'] ?? '-' }}</td>
+                    <td>{{ $paymentRow['mode'] ?? '-' }}</td>
+                    <td>{{ number_format($paymentRow['value'] ?? 0, 2) }}</td>
+                </tr>
+            @empty
+                <tr>
+                    <td>{{ $invoice['payment']['ref'] ?? '-' }}</td>
+                    <td>{{ $invoice['payment']['mode'] ?? '-' }}</td>
+                    <td>{{ number_format($invoice['payment']['value'] ?? 0, 2) }}</td>
+                </tr>
+            @endforelse
         </tbody>
     </table>
 

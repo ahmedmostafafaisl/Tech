@@ -124,7 +124,13 @@ class Invoice2Controller extends Controller
                 QrCode::format('svg')->size(100)->generate($qrData)
             );
 
-            $html = view('pdf.invoice', compact(
+            // invoice_use_new_template (default: OFF — the original layout keeps rendering unless this is
+            // explicitly turned on) switches to pdf.invoice-v2, a redesigned layout. Both views are handed
+            // the exact same $invoice/$qrCode/$labels/$logoSrc data — mapInvoiceResponseToPdfData() needed
+            // no change for this.
+            $view = \App\Models\Setting::isActive('invoice_use_new_template', false) ? 'pdf.invoice-v2' : 'pdf.invoice';
+
+            $html = view($view, compact(
                 'invoice',
                 'qrCode',
                 'labels',

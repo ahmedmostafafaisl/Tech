@@ -52,8 +52,10 @@ class SettingSeeder extends Seeder
         //serial_live_cancellation_check_active
         // Setting::firstOrCreate(['key' => 'serial_reuse_validation_active'], ['value' => 'false']);
         // Invoice WhatsApp send settings.
-        Setting::create(['key' => 'invoice_send_whatsapp_active', 'value' => 'true']);
-        Setting::create(['key' => 'invoice_send_sms_active', 'value' => 'true']);
-        Setting::create(['key' => 'invoice_whatsapp_template_name', 'value' => 'invoice_whatsapp_template']);
+        Setting::firstOrCreate(['key' => 'invoice_send_whatsapp_active'], ['value' => 'true']);
+        Setting::firstOrCreate(['key' => 'invoice_send_sms_active'], ['value' => 'true']);
+        Setting::firstOrCreate(['key' => 'invoice_whatsapp_template_name'], ['value' => 'invoice_whatsapp_template_with_evaluation']);
+        Setting::firstOrCreate(['key' => 'invoice_use_new_template'], ['value' => 'true']);
+        Setting::firstOrCreate(['key' => 'invoice_whatsapp_use_template'], ['value' => 'true']);
     }
 }
