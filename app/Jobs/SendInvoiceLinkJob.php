@@ -33,12 +33,12 @@ use Illuminate\Support\Str;
  * The WhatsApp template name itself is NOT hardcoded — it's read from the invoice_whatsapp_template_name
  * setting, so a newly-approved template can be wired in by changing a setting value, not by a code change.
  *
- * Sent alongside the invoice link in both channels, when resolvable: the appointment's evaluation/rating
- * link (EvaluationLinkResolver, keyed off order_type). This is IN ADDITION TO the separate evaluation
- * WhatsApp message EvaluationMessageController::createAndSendEvaluation() already sends elsewhere — that
- * one is unchanged and keeps sending on its own. If order_type can't be resolved to a known evaluation
- * link, or the appointment record can't be found at all, the invoice link is still sent on its own rather
- * than failing the whole job over a missing, secondary piece of information.
+ * Sent alongside the invoice link in both channels: the appointment's evaluation/rating link
+ * (EvaluationLinkResolver, keyed off order_type — always resolves to a real link, falling back to the sales
+ * evaluation page when order_type is missing or unrecognized, so there's always something valid to send).
+ * This is IN ADDITION TO the separate evaluation WhatsApp message
+ * EvaluationMessageController::createAndSendEvaluation() already sends elsewhere — that one is unchanged
+ * and keeps sending on its own.
  */
 class SendInvoiceLinkJob implements ShouldQueue
 {
@@ -118,11 +118,11 @@ class SendInvoiceLinkJob implements ShouldQueue
         }
     }
 
-    private function sendViaSms(string $shortUrl, ?string $evaluationLink): bool
+    private function sendViaSms(string $shortUrl, string $evaluationLink): bool
     {
-        $smsResponse = $evaluationLink !== null
-            ? app(TaqnyatSmsService::class)->sendPdfLinkWithEvaluation($this->phone, $shortUrl, $evaluationLink)
-            : app(TaqnyatSmsService::class)->sendPdfLink($this->phone, $shortUrl);
+        // EvaluationLinkResolver always resolves to a real link now (falls back to the sales evaluation
+        // page for a null/unrecognized order_type), so this always has a genuine evaluation link to include.
+        $smsResponse = app(TaqnyatSmsService::class)->sendPdfLinkWithEvaluation($this->phone, $shortUrl, $evaluationLink);
 
         $sent = is_array($smsResponse)
             && isset($smsResponse['statusCode'])
@@ -139,7 +139,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         return $sent;
     }
 
-    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, string $shortUrl, ?string $evaluationLink): bool
+    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, string $shortUrl, string $evaluationLink): bool
     {
         $templateName = Setting::where('key', 'invoice_whatsapp_template_name')->value('value');
 
@@ -153,19 +153,16 @@ class SendInvoiceLinkJob implements ShouldQueue
 
         // The approved template is bilingual with 4 DISTINCT variables, not 2 reused ones: {{1}}/{{2}} for
         // the Arabic section, {{3}}/{{4}} for the English section repeating the same two links — deliberate,
-        // so neither language's slot is ever filled by assuming the other's position. Meta requires every
-        // declared variable to be filled, so without an evaluation link this template can't be sent at all
-        // (there's no sensible value for {{2}}/{{4}}) — WhatsApp is skipped in that case; SMS still falls
-        // back to its own, separate invoice-only message independently.
-        if ($evaluationLink === null) {
-            Log::warning('SendInvoiceLinkJob: WhatsApp send skipped — template requires an evaluation link and none resolved', [
-                'book_id' => $this->bookId,
-                'phone' => $this->phone,
-            ]);
-            return false;
-        }
-
-        $bodyParameters = [$shortUrl, $evaluationLink, $shortUrl, $evaluationLink];
+        // so neither language's slot is ever filled by assuming the other's position.
+        //
+        // Meta's Cloud API rejects a "parameters" array of raw strings outright ("expected: '[object,
+        // null]'") — every parameter must be an object. Every OTHER existing caller of
+        // sendTemplateMessage() (WhatsAppController, etc.) already builds this shape themselves; this job
+        // was the first to pass raw strings instead, which is what actually triggered the error — the
+        // service method itself is a plain pass-through and needed no change.
+        $bodyParameters = collect([$shortUrl, $evaluationLink, $shortUrl, $evaluationLink])
+            ->map(fn($value) => ['type' => 'text', 'text' => $value])
+            ->all();
 
         try {
             $response = $whatsAppService->sendTemplateMessage($this->phone, $templateName, $bodyParameters);
