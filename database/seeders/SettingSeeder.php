@@ -50,6 +50,6 @@ class SettingSeeder extends Seeder
 
 
         //serial_live_cancellation_check_active
-        Setting::firstOrCreate(['key' => 'serial_live_cancellation_check_active'], ['value' => 'false']);
+        Setting::firstOrCreate(['key' => 'serial_reuse_validation_active'], ['value' => 'false']);
     }
 }

@@ -33,7 +33,7 @@ class DatabaseSeeder extends Seeder
             // PeriodicAppointmentsSeeder::class,
             // ServiceAppointmentsSeeder::class,
             // EmergencyAppointmentsSeeder::class,
-            // SettingSeeder::class,
+            SettingSeeder::class,
             // InvoiceSettingSeeder::class,
         ]);
     }

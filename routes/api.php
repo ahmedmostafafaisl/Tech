@@ -665,6 +665,10 @@ Route::middleware('auth:sanctum')->prefix('new')->group(function () {
     // serials if it's now cancelled — see each line's/product's reserved_serials array (single3-appointment,
     // main-warehouse) for which book_id to pass here.
     Route::post('/integration/appointments/{book_id}/check-cancellation', [NewDirectIntegrationController::class, 'checkAppointmentCancellation']);
+
+    // This appointment's serial-tracked items with reserved_serials — moved out of single3-appointment's own
+    // response into its own call, for a caller that specifically wants this detail.
+    Route::get('/integration/appointments/{book_id}/reserved-serials', [NewDirectIntegrationController::class, 'reservedSerialsForAppointment']);
     Route::post('/integration/tech-warehouse', [NewDirectIntegrationController::class, 'techWarehouse']);
     Route::post('/integration/main-warehouse', [NewDirectIntegrationController::class, 'mainWarehouse']);
     // product limit
