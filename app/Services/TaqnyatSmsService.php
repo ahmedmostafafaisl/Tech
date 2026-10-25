@@ -114,4 +114,39 @@ class TaqnyatSmsService
             ];
         }
     }
+
+    /**
+     * Same invoice-link message as sendPdfLink(), with the appointment's evaluation link added — sent
+     * together in one SMS rather than as two separate messages. Used by SendInvoiceLinkJob when the
+     * appointment's order_type resolves to a known evaluation link (EvaluationLinkResolver); falls back to
+     * sendPdfLink() otherwise, since that method stays unchanged for every other caller.
+     */
+    public function sendPdfLinkWithEvaluation($phone, $invoiceLink, $evaluationLink)
+    {
+        $url = 'https://api.taqnyat.sa/v1/messages';
+
+        $data = [
+            'recipients' => [$phone],
+            'body' => "رابط الفاتورة الخاصة بك: {$invoiceLink}\nنسعد بتقييمك لتجربتك معنا: {$evaluationLink}",
+            'sender' => $this->senderName_Care,
+        ];
+
+        try {
+            $response = $this->client->post($url, [
+                'headers' => [
+                    'Authorization' => "Bearer {$this->apiKey}",
+                    'Content-Type'  => 'application/json',
+                ],
+                'json' => $data,
+            ]);
+
+            return json_decode($response->getBody(), true);
+        } catch (RequestException $e) {
+            return [
+                'success' => false,
+                'message' => 'فشل في إرسال رابط الفاتورة',
+                'error'   => $e->getMessage(),
+            ];
+        }
+    }
 }

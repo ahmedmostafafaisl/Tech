@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Models\DirectAppointment;
 use App\Models\Setting;
 use App\Models\ShortLink;
 use App\Services\DY365\DyService;
+use App\Services\Evaluation\EvaluationLinkResolver;
 use App\Services\TaqnyatSmsService;
 use App\Services\WhatsApp\WhatsAppConfirmationService;
 use Illuminate\Bus\Queueable;
@@ -30,6 +32,13 @@ use Illuminate\Support\Str;
  *     failed send, not crash anything)
  * The WhatsApp template name itself is NOT hardcoded — it's read from the invoice_whatsapp_template_name
  * setting, so a newly-approved template can be wired in by changing a setting value, not by a code change.
+ *
+ * Sent alongside the invoice link in both channels, when resolvable: the appointment's evaluation/rating
+ * link (EvaluationLinkResolver, keyed off order_type). This is IN ADDITION TO the separate evaluation
+ * WhatsApp message EvaluationMessageController::createAndSendEvaluation() already sends elsewhere — that
+ * one is unchanged and keeps sending on its own. If order_type can't be resolved to a known evaluation
+ * link, or the appointment record can't be found at all, the invoice link is still sent on its own rather
+ * than failing the whole job over a missing, secondary piece of information.
  */
 class SendInvoiceLinkJob implements ShouldQueue
 {
@@ -89,16 +98,19 @@ class SendInvoiceLinkJob implements ShouldQueue
             return;
         }
 
-        $shortUrl = url('/i/' . $shortLink->code);
+        $shortUrl = url('/' . $shortLink->code);
+
+        $orderType = DirectAppointment::where('book_id', $this->bookId)->latest('id')->value('order_type');
+        $evaluationLink = EvaluationLinkResolver::resolve($orderType);
 
         $sentViaAny = false;
 
         if (Setting::isActive('invoice_send_sms_active', true)) {
-            $sentViaAny = $this->sendViaSms($shortUrl) || $sentViaAny;
+            $sentViaAny = $this->sendViaSms($shortUrl, $evaluationLink) || $sentViaAny;
         }
 
         if (Setting::isActive('invoice_send_whatsapp_active', false)) {
-            $sentViaAny = $this->sendViaWhatsApp($whatsAppService, $shortUrl) || $sentViaAny;
+            $sentViaAny = $this->sendViaWhatsApp($whatsAppService, $shortUrl, $evaluationLink) || $sentViaAny;
         }
 
         if ($sentViaAny) {
@@ -106,9 +118,11 @@ class SendInvoiceLinkJob implements ShouldQueue
         }
     }
 
-    private function sendViaSms(string $shortUrl): bool
+    private function sendViaSms(string $shortUrl, ?string $evaluationLink): bool
     {
-        $smsResponse = app(TaqnyatSmsService::class)->sendPdfLink($this->phone, $shortUrl);
+        $smsResponse = $evaluationLink !== null
+            ? app(TaqnyatSmsService::class)->sendPdfLinkWithEvaluation($this->phone, $shortUrl, $evaluationLink)
+            : app(TaqnyatSmsService::class)->sendPdfLink($this->phone, $shortUrl);
 
         $sent = is_array($smsResponse)
             && isset($smsResponse['statusCode'])
@@ -125,7 +139,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         return $sent;
     }
 
-    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, string $shortUrl): bool
+    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, string $shortUrl, ?string $evaluationLink): bool
     {
         $templateName = Setting::where('key', 'invoice_whatsapp_template_name')->value('value');
 
@@ -137,8 +151,12 @@ class SendInvoiceLinkJob implements ShouldQueue
             return false;
         }
 
+        // Second body parameter only when there's an evaluation link to send — the approved template's own
+        // parameter count must match whichever of these is actually sent.
+        $bodyParameters = $evaluationLink !== null ? [$shortUrl, $evaluationLink] : [$shortUrl];
+
         try {
-            $response = $whatsAppService->sendTemplateMessage($this->phone, $templateName, [$shortUrl]);
+            $response = $whatsAppService->sendTemplateMessage($this->phone, $templateName, $bodyParameters);
         } catch (\Throwable $e) {
             Log::warning('SendInvoiceLinkJob: WhatsApp send failed', [
                 'book_id' => $this->bookId,

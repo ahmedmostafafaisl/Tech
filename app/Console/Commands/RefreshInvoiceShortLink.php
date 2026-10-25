@@ -75,7 +75,8 @@ class RefreshInvoiceShortLink extends Command
             'sent'    => false,
         ]);
 
-        $shortUrl = url('/i/' . $shortLink->code);
+        // /i/ dropped — see the matching comment in SendInvoiceLinkJob.
+        $shortUrl = url('/' . $shortLink->code);
 
         $this->info('New short link created:');
         $this->line("  code:      {$shortLink->code}");

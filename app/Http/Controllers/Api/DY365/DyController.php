@@ -977,7 +977,8 @@ class DyController extends Controller
                 'sent' => false,
             ]);
 
-            $shortUrl = rtrim(config('app.url'), '/') . "/i/{$code}";
+            // /i/ dropped — see the matching comment in SendInvoiceLinkJob.
+            $shortUrl = rtrim(config('app.url'), '/') . "/{$code}";
 
             // ✅ Send short link via SMS (instead of long S3 url)
             $smsLimiter->hit();

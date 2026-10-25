@@ -52,3 +52,14 @@ Route::get('/invoice2/{id}/stream', [Invoice2Controller::class, 'stream'])
 Route::get('/login', function () {
     return redirect('/api/auth/send-otp');
 })->name('login');
+
+// Shorter short-link format: https://{domain}/{code} instead of /i/{code}. The regex constraint — exactly
+// 8 alphanumeric characters, matching ShortLinkCodeGenerator's output — is what makes a root-level wildcard
+// route safe here: it can only ever match an actual short-link code, never a real route name like "login"
+// (5 characters) or "payment-success" (contains a hyphen), so it can't shadow anything above it. Registered
+// last anyway, as a second layer of safety, so any future route added above it is never at risk either way.
+// /i/{code} (above) is kept working indefinitely — links already sent to customers before this change must
+// keep resolving.
+Route::get('/{code}', [ShortLinkController::class, 'show'])
+    ->where('code', '[a-zA-Z0-9]{8}')
+    ->name('shortlink.show.short');

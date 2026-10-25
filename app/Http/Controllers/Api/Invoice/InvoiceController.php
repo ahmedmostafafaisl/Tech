@@ -167,7 +167,8 @@ class InvoiceController extends Controller
             ]);
         }
 
-        $shortUrl = url('/i/' . $shortLink->code);
+        // /i/ dropped — see the matching comment in SendInvoiceLinkJob.
+        $shortUrl = url('/' . $shortLink->code);
 
         // ── 3.5. Get completion date from DirectAppointment ───────────────────────
         $completionDate = null;
