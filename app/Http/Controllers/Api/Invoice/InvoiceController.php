@@ -62,6 +62,14 @@ class InvoiceController extends Controller
         return  $invoices = $this->invoiceRepository->getByAppointment($appointmentId);
     }
 
+    /**
+     * Checking DY365 for an actual invoice (getOrCreateInvoiceByBookId) and sending the link now both
+     * happen in the background (SendInvoiceLinkJob) — this endpoint only validates input and queues the
+     * job, so it responds immediately regardless of how long DY365 takes to answer. Previously this sent a
+     * link with no verification an invoice existed at all; the background job is where that check now
+     * lives. short_url/file_url are no longer returned here, since the ShortLink record isn't created until
+     * the job actually confirms DY365 has data — see GET /short-links?book_id=... to look one up once sent.
+     */
     public function sendInvoiceLink(Request $request)
     {
         $request->validate([
@@ -70,61 +78,16 @@ class InvoiceController extends Controller
             'sent'    => 'sometimes|boolean',
         ]);
 
-        $bookId = $request->input('book_id');
-        $pdfUrl = url('/api/invoice/' . $bookId . '/download');
-
-        // ✅ Get latest existing record or create a new one
-        $shortLink = ShortLink::where('book_id', $bookId)->latest('id')->first();
-
-        if (!$shortLink) {
-            $shortLink = ShortLink::create([
-                'book_id' => $bookId,
-                'code'    => $this->generateUniqueCode(),
-                'url'     => $pdfUrl,
-                'sent'    => false,
-            ]);
-        }
-
-        $shortUrl = url('/i/' . $shortLink->code);
-
-        // ✅ Send SMS
-        if ($shortLink->sent && !$request->boolean('sent')) {
-            return response()->json([
-                'success'   => true,
-                'message'   => 'Link already sent previously.',
-                'file_url'  => $pdfUrl,
-                'short_url' => $shortUrl,
-            ]);
-        }
-
-
-
-        $smsResponse = $this->taqnyatSmsService->sendPdfLink(
-            $request->phone,
-            $shortUrl
+        \App\Jobs\SendInvoiceLinkJob::dispatch(
+            $request->input('book_id'),
+            $request->input('phone'),
+            $request->boolean('sent')
         );
 
-        $smsSent = is_array($smsResponse)
-            && isset($smsResponse['statusCode'])
-            && (int) $smsResponse['statusCode'] === 201;
-
-        // ✅ Update sent status
-        if ($smsSent) {
-            $shortLink->update(['sent' => true]);
-        } else {
-            Log::warning('SMS إرسال فشل', [
-                'book_id'  => $bookId,
-                'phone'    => $request->phone,
-                'response' => $smsResponse,
-            ]);
-        }
-
         return response()->json([
-            'success'   => $smsSent,
-            'file_url'  => $pdfUrl,
-            'short_url' => $shortUrl,
-            'sms'       => $smsResponse,
-        ]);
+            'success' => true,
+            'message' => 'Processing — the invoice link will be sent once confirmed with Dynamics.',
+        ], 202);
     }
 
     private function generateUniqueCode(): string

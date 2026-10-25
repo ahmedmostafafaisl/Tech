@@ -10,4 +10,8 @@ class ShortLink extends Model
     use HasFactory;
 
     protected $fillable = ['code', 'url',  'hits', 'book_id', 'sent'];
+
+    protected $casts = [
+        'sent' => 'boolean',
+    ];
 }
