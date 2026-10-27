@@ -363,7 +363,7 @@ class TamaraService
                 'status' => 'created',
                 'amount' => $paymentAmount,
                 'phone' => $data['phone'] ?? '0522222222',
-                'customer_account' => $data['customeraccount'] ?? null,
+                'customer_account' => $data['custAccount'] ?? null,
                 'book_id' => $data['bookId'] ?? null,
             ]);
             $dyPayment->lines()->createMany($payment['items']);

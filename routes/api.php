@@ -747,6 +747,22 @@ Route::middleware('auth:sanctum')->prefix('payments/nearpay')->group(function ()
     Route::post('/create', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'create']);
     Route::post('/confirm', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'confirm']);
 });
+
+// NearPay terminal management — every tech must be assigned a physical terminal; see
+// NearPayTerminalController's own docblock for the full cycle (create, assign, unassign), and UserResource
+// for how a terminal shows up on the logged-in tech's own response (verify-pin).
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('nearpay/terminals')->group(function () {
+    Route::get('/', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'store']);
+    Route::post('/sync', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'sync']);
+    Route::post('/{terminal}/assign', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'assign']);
+    Route::post('/{terminal}/unassign', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'unassign']);
+});
+
+Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('/nearpay/technicians/unassigned', [
+    \App\Http\Controllers\Api\NearPay\NearPayTerminalController::class,
+    'unassignedTechnicians',
+]);
 // GET /integration/tabby/sync-payment-status?payment_id=...
 Route::get('integration/tabby/sync-payment-status', [TabbyPaymentController::class, 'syncPaymentStatus']);
 // sync tamara payment

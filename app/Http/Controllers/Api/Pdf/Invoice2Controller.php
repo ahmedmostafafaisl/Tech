@@ -39,9 +39,12 @@ class Invoice2Controller extends Controller
             'value' => (float) ($payment['Amount'] ?? 0),
         ])->values()->toArray();
 
-        $invoiceDate = !empty($data['InvoiceDate'])
-            ? Carbon::parse($data['InvoiceDate'])->format('Y-m-d')
-            : now()->format('Y-m-d');
+        $invoiceDateTime = !empty($data['InvoiceDate']) ? Carbon::parse($data['InvoiceDate']) : now();
+        // 'date' format is unchanged (pdf.invoice, the older view, shares this same mapping and already
+        // expects Y-m-d) — 'time' is new, read from the same InvoiceDate value rather than a new DY365
+        // field, for invoice-v2's separate Date/Time columns.
+        $invoiceDate = $invoiceDateTime->format('Y-m-d');
+        $invoiceTime = $invoiceDateTime->format('H:i:s');
 
         $customerAddress = isset($data['CustomerAddress'])
             ? str_replace("\n", ' - ', $data['CustomerAddress'])
@@ -50,13 +53,16 @@ class Invoice2Controller extends Controller
         return [
             'number'              => $data['InvoiceId'] ?? '-',
             'date'                => $invoiceDate,
+            'time'                => $invoiceTime,
             'printed_at'          => now()->format('Y-m-d H:i:s'),
             'registration_number' => $data['RegistrationNumber'] ?? '-',
             'sales_person'        => $data['SalesmanName'] ?? '-',
             'customer' => [
-                'name'    => $data['CustomerName'] ?? '-',
-                'number'  => $data['CustomerAccount'] ?? '-',
-                'address' => $customerAddress,
+                'name'         => $data['CustomerName'] ?? '-',
+                'number'       => $data['CustomerAccount'] ?? '-',
+                'vat_no'       => $data['CustomerVatNumber'] ?? '—',
+                'address'      => $customerAddress,
+                'territory'    => $data['Territory'] ?? '—',
             ],
             'items'  => $items,
             'totals' => [
@@ -73,16 +79,20 @@ class Invoice2Controller extends Controller
                 'value' => (float) ($firstPayment['Amount'] ?? ($data['Amount'] ?? 0)),
             ],
             'payments' => $allPayments,
+            // Defaults below reflect Naqi's actual registered details (the sample invoice this layout was
+            // built from) — still fully overridable via the invoice-settings 'company' key at any time;
+            // these are just a correct baseline rather than placeholder text.
             'company' => array_merge([
-                'address' => '-',
-                'city'    => '-',
-                'country' => '-',
-                'phone'   => '-',
-                'email'   => '-',
-                'vat_no'  => '-',
-                'name_ar' => '-',
-                'name_en' => '-',
-                'tagline' => '-',
+                'address'        => '6549 Wadi Al Shuara, Al Olaya',
+                'city'           => 'Riyadh 12211',
+                'country'        => 'Saudi Arabia',
+                'phone'          => '920021500',
+                'email'          => 'contact@naqi.sa',
+                'vat_no'         => '310362058800003',
+                'unified_number' => '920021500',
+                'name_ar'        => 'شركة النبع النقي للتجارة',
+                'name_en'        => 'Al Nabea Al Naqi Trading Company',
+                'tagline'        => 'محطات تحلية مياه - الرياض والقصيم',
             ], InvoiceSetting::getValue('company', [])),
         ];
     }

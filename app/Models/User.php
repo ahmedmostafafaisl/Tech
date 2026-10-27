@@ -57,6 +57,11 @@ class User extends Authenticatable
         return $this->hasMany(Appointment::class, 'customer_id');
     }
 
+    public function nearPayTerminal()
+    {
+        return $this->hasOne(NearPayTerminal::class, 'assigned_user_id');
+    }
+
 
     public function technicianAppointments()
     {
