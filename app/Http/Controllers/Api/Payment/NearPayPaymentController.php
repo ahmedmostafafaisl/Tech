@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Payment;
 
 use App\Http\Requests\Payment\ConfirmNearPayPaymentRequest;
 use App\Http\Requests\Payment\CreateNearPayPaymentRequest;
+use App\Http\Requests\Payment\HandleNfcPaymentResponseRequest;
 use App\Models\DirectAppointment;
 use App\Models\DirectAppointmentPayment;
 use App\Services\CheckCompleteStatus\CheckCompleteService;
@@ -144,13 +145,20 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
      * our own order/payment). Refuses to let a transaction id already claimed by a DIFFERENT payment be
      * reused, and refuses to silently overwrite a payment already claimed with a DIFFERENT transaction id —
      * both checked and written inside one locked transaction, closing the race between two concurrent
-     * confirm() calls for the same payment or the same transaction id.
+     * confirm()/handleNfcResponse() calls for the same payment or the same transaction id.
+     *
+     * $paymentType scopes the "already claimed by a different payment" check to the same flow this payment
+     * belongs to (NEARPAY for confirm(), NFC for handleNfcResponse()) — the two are otherwise independent,
+     * so a transaction id existing under one flow must never block the other.
+     *
+     * $extraAttributes are written in the SAME locked update as payment_id, not a separate call afterwards —
+     * e.g. handleNfcResponse()'s retrieval_reference_number, which has no meaning without a successful claim.
      *
      * @return array{ok: bool, message?: string}
      */
-    private function claimTransaction(DirectAppointmentPayment $payment, string $transactionId): array
+    private function claimTransaction(DirectAppointmentPayment $payment, string $transactionId, string $paymentType = 'NEARPAY', array $extraAttributes = []): array
     {
-        return DB::transaction(function () use ($payment, $transactionId) {
+        return DB::transaction(function () use ($payment, $transactionId, $paymentType, $extraAttributes) {
             $locked = DirectAppointmentPayment::where('id', $payment->id)->lockForUpdate()->first();
 
             if (!$locked) {
@@ -167,7 +175,7 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
                 return ['ok' => false, 'message' => 'This payment is already linked to a different transaction.'];
             }
 
-            $reusedElsewhere = DirectAppointmentPayment::where('payment_type', 'NEARPAY')
+            $reusedElsewhere = DirectAppointmentPayment::where('payment_type', $paymentType)
                 ->where('payment_id', $transactionId)
                 ->where('id', '!=', $locked->id)
                 ->lockForUpdate()
@@ -183,10 +191,66 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
             }
 
             if ($locked->payment_id === null) {
-                $locked->update(['payment_id' => $transactionId]);
+                $locked->update(array_merge(['payment_id' => $transactionId], $extraAttributes));
+            } elseif (!empty($extraAttributes)) {
+                $locked->update($extraAttributes);
             }
 
             return ['ok' => true];
         });
+    }
+
+    /**
+     * NFC (tap-to-pay) counterpart to confirm() — same shape, different field names and a different local
+     * lookup (payment_type = 'NFC', created by sendPaymentLinks, not create()). customer_reference_number is
+     * this app's own reference_id; payment_id is NearPay's transaction id, verified server-side exactly like
+     * confirm() does — a client-reported outcome is never trusted on its own.
+     */
+    public function handleNfcResponse(HandleNfcPaymentResponseRequest $request)
+    {
+        $validated = $request->validated();
+
+        $payment = DirectAppointmentPayment::where('reference_id', $validated['customer_reference_number'])
+            ->where('payment_type', 'NFC')
+            ->first();
+
+        if (!$payment) {
+            return response()->json(['status' => false, 'message' => 'Payment not found.'], 404);
+        }
+
+        $appointment = $payment->directAppointment;
+
+        $this->checkCompleteService->authorizeTechOrFail(
+            $appointment?->tech_id,
+            "Unauthorized NFC payment response for customer_reference_number {$validated['customer_reference_number']}"
+        );
+
+        $claim = $this->claimTransaction(
+            $payment,
+            $validated['payment_id'],
+            'NFC',
+            ['retrieval_reference_number' => $validated['retrieval_reference_number']]
+        );
+
+        if (!$claim['ok']) {
+            return response()->json(['status' => false, 'message' => $claim['message']], 409);
+        }
+
+        try {
+            $result = $this->syncService->syncPayment($payment->fresh());
+        } catch (\Throwable $e) {
+            Log::error('NFC payment response: verification failed.', [
+                'reference_id' => $payment->reference_id,
+                'payment_id'   => $validated['payment_id'],
+                'error'        => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status'  => false,
+                'message' => 'Could not verify this payment with NearPay right now. It will be re-checked automatically.',
+            ], 503);
+        }
+
+        return response()->json(['status' => true, 'data' => $result]);
     }
 }

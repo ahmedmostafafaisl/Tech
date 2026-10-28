@@ -44,7 +44,6 @@ class NearPayAccountsService
 
     private function assertConfigured(): void
     {
-
         if ($this->baseUrl === '' || $this->apiKey === '') {
             throw new \RuntimeException('NearPay Accounts API is not configured: NEARPAY_ACCOUNTS_BASE_URL and/or NEARPAY_API_KEY are empty.');
         }
@@ -52,7 +51,6 @@ class NearPayAccountsService
 
     private function client()
     {
-
         return Http::withHeaders(['api-key' => $this->apiKey])
             ->baseUrl($this->baseUrl)
             ->acceptJson()
@@ -114,7 +112,7 @@ class NearPayAccountsService
             $response = $this->client()->post("terminals/{$nearpayTerminalId}/assign", [
                 'name'   => $name,
                 'email'  => $email,
-                'mobile' => $mobile,
+                'mobile' => $this->toInternationalSaudiMobile($mobile),
             ]);
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             throw new \RuntimeException('Could not reach NearPay: ' . $e->getMessage(), previous: $e);
@@ -125,6 +123,42 @@ class NearPayAccountsService
         }
 
         return (array) $response->json('terminal');
+    }
+
+    /**
+     * NearPay rejects local-format numbers outright ("Please provide a valid mobile number") — confirmed
+     * directly from a failed assign call with "0569347957" as sent. Local users store phone in local Saudi
+     * format (e.g. "0569347957"), so this normalizes to the "+966..." shape NearPay actually requires,
+     * regardless of which of the common input shapes a caller happens to have:
+     *   "0569347957"    (local, leading 0)       -> "+966569347957"
+     *   "569347957"     (local, no leading 0)    -> "+966569347957"
+     *   "966569347957"  (international, no '+')  -> "+966569347957"
+     *   "+966569347957" (already correct)        -> unchanged
+     * Anything else (an unrecognized shape) is passed through as-is rather than guessed at further — NearPay
+     * itself is still the final check, and a passthrough surfaces as the same clear validation error this
+     * fix was written for, instead of being silently mangled into something equally wrong.
+     */
+    private function toInternationalSaudiMobile(string $mobile): string
+    {
+        $digits = preg_replace('/[^0-9]/', '', $mobile);
+
+        if (str_starts_with($mobile, '+966')) {
+            return '+966' . substr($digits, 3);
+        }
+
+        if (str_starts_with($digits, '966')) {
+            return '+' . $digits;
+        }
+
+        if (str_starts_with($digits, '0')) {
+            return '+966' . substr($digits, 1);
+        }
+
+        if (strlen($digits) === 9) {
+            return '+966' . $digits;
+        }
+
+        return $mobile;
     }
 
     /**

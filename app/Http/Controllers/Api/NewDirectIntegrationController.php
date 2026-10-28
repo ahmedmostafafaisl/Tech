@@ -2303,6 +2303,10 @@ class NewDirectIntegrationController extends Controller
                         'CASH' => 'CASH',
                         'POS' => 'POS',
                         'TRNS' => 'TRNS',
+                        // NFC (tap-to-pay via NearPay's on-device SDK): no checkout link, no SMS — the
+                        // reference_id generated below is what the device uses to report back once the tap
+                        // completes, via NearPayPaymentController::handleNfcResponse().
+                        'NFC' => 'NFC',
                         default => $typeUpper,
                     };
 
@@ -2385,6 +2389,13 @@ class NewDirectIntegrationController extends Controller
                             $results[] = [
                                 'reference_id' => $payment->reference_id,
                                 'payment_url' => $link,
+                            ];
+                        } elseif ($paymentType === 'NFC') {
+                            // No link, no SMS — the technician's own device talks to NearPay directly. The
+                            // reference_id is the only thing the caller needs back, to start the on-device
+                            // NFC transaction and later report its outcome.
+                            $results[] = [
+                                'reference_id' => $payment->reference_id,
                             ];
                         }
                     }
