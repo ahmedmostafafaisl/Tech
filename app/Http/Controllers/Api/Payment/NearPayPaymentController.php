@@ -147,9 +147,9 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
      * both checked and written inside one locked transaction, closing the race between two concurrent
      * confirm()/handleNfcResponse() calls for the same payment or the same transaction id.
      *
-     * $paymentType scopes the "already claimed by a different payment" check to the same flow this payment
-     * belongs to (NEARPAY for confirm(), NFC for handleNfcResponse()) — the two are otherwise independent,
-     * so a transaction id existing under one flow must never block the other.
+     * $paymentType scopes the "already claimed by a different payment" check — both confirm() and
+     * handleNfcResponse() pass 'NEARPAY' (the one shared type for this payment method, however it was
+     * created), so the parameter stays generic rather than hardcoding that string inside this method itself.
      *
      * $extraAttributes are written in the SAME locked update as payment_id, not a separate call afterwards —
      * e.g. handleNfcResponse()'s retrieval_reference_number, which has no meaning without a successful claim.
@@ -201,17 +201,18 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
     }
 
     /**
-     * NFC (tap-to-pay) counterpart to confirm() — same shape, different field names and a different local
-     * lookup (payment_type = 'NFC', created by sendPaymentLinks, not create()). customer_reference_number is
-     * this app's own reference_id; payment_id is NearPay's transaction id, verified server-side exactly like
-     * confirm() does — a client-reported outcome is never trusted on its own.
+     * NFC (tap-to-pay) counterpart to confirm() — same underlying NearPay mechanism and the SAME
+     * payment_type ('NEARPAY') as confirm()/create(), just a different entry point (sendPaymentLinks, not
+     * create()) with a different response shape to match. customer_reference_number is this app's own
+     * reference_id; payment_id is NearPay's transaction id, verified server-side exactly like confirm()
+     * does — a client-reported outcome is never trusted on its own.
      */
     public function handleNfcResponse(HandleNfcPaymentResponseRequest $request)
     {
         $validated = $request->validated();
 
         $payment = DirectAppointmentPayment::where('reference_id', $validated['customer_reference_number'])
-            ->where('payment_type', 'NFC')
+            ->where('payment_type', 'NEARPAY')
             ->first();
 
         if (!$payment) {
@@ -228,7 +229,7 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
         $claim = $this->claimTransaction(
             $payment,
             $validated['payment_id'],
-            'NFC',
+            'NEARPAY',
             ['retrieval_reference_number' => $validated['retrieval_reference_number']]
         );
 

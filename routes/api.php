@@ -746,7 +746,7 @@ Route::post('/webhooks/nearpay', [\App\Http\Controllers\Api\Payment\NearPayWebho
 Route::middleware('auth:sanctum')->prefix('payments/nearpay')->group(function () {
     Route::post('/create', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'create']);
     Route::post('/confirm', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'confirm']);
-    // NFC (tap-to-pay) counterpart to /confirm — created via sendPaymentLinks's payment_type=NFC, not /create.
+    // NFC (tap-to-pay) counterpart to /confirm — created via sendPaymentLinks's payment_type=NEARPAY, not /create.
     Route::post('/nfc-response', [\App\Http\Controllers\Api\Payment\NearPayPaymentController::class, 'handleNfcResponse']);
 });
 

@@ -31,7 +31,7 @@ class NearPayService
     public function __construct()
     {
         $this->baseUrl        = rtrim((string) config('services.nearpay.base_url', ''), '/');
-        $this->apiKey         = (string) config('services.nearpay.api_key', '');
+        $this->apiKey         = rtrim((string) config('services.nearpay.api_key', ''), '/');
         $this->timeout        = (int) config('services.nearpay.timeout', 20);
         $this->connectTimeout = (int) config('services.nearpay.connect_timeout', 5);
     }

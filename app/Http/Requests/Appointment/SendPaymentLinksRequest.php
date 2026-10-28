@@ -37,7 +37,7 @@ class SendPaymentLinksRequest extends FormRequest
                         'CASH'                    => 'CASH',
                         'POS'                     => 'POS',
                         'TRNS'                    => 'TRNS',
-                        'NFC'                     => 'NFC',
+                        'NEARPAY'                 => 'NEARPAY',
                         default                   => $rawType,
                     };
                 }
@@ -80,7 +80,7 @@ class SendPaymentLinksRequest extends FormRequest
 
             'payments'                     => 'required|array|min:1',
             'payments.*.price'             => 'required|numeric|min:0.01',
-            'payments.*.payment_type'      => 'required|string|in:TABI,TAMARA,E-Commerce,CASH,POS,TRNS,NFC',
+            'payments.*.payment_type'      => 'required|string|in:TABI,TAMARA,E-Commerce,CASH,POS,TRNS,NEARPAY',
             'payments.*.phone'             => 'required|string|min:8|max:20',
             'payments.*.reference_id'      => 'nullable|string|max:255',
             'payments.*.is_paid'           => 'nullable|boolean',
@@ -277,7 +277,7 @@ class SendPaymentLinksRequest extends FormRequest
             'payments.*.price.required'        => 'Payment price is required.',
             'payments.*.price.min'             => 'Payment price must be greater than 0.',
             'payments.*.payment_type.required' => 'Payment type is required.',
-            'payments.*.payment_type.in'       => 'Payment type must be TABI, TAMARA, E-Commerce, CASH, POS, TRNS, or NFC.',
+            'payments.*.payment_type.in'       => 'Payment type must be TABI, TAMARA, E-Commerce, CASH, POS, TRNS, or NEARPAY.',
             'payments.*.phone.required'        => 'Phone is required for each payment.',
             'payments.*.reference_id.max'      => 'Reference ID must not exceed 255 characters.',
         ];
