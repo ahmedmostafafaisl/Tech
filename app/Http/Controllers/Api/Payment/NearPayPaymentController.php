@@ -9,6 +9,7 @@ use App\Models\DirectAppointment;
 use App\Models\DirectAppointmentPayment;
 use App\Services\CheckCompleteStatus\CheckCompleteService;
 use App\Services\Payment\NearPayPaymentSyncService;
+use App\Services\Telegram\TelegramService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -239,13 +240,10 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
 
         try {
             $result = $this->syncService->syncPayment($payment->fresh());
+            TelegramService::send('NFC payment response:result ' . json_encode($result) . ' for reference_id ' . $payment->reference_id);
         } catch (\Throwable $e) {
-            Log::error('NFC payment response: verification failed.', [
-                'reference_id' => $payment->reference_id,
-                'payment_id'   => $validated['payment_id'],
-                'error'        => $e->getMessage(),
-            ]);
 
+            TelegramService::send('NFC payment response: verification failed for reference_id ' . $payment->reference_id . '. Error: ' . $e->getMessage());
             return response()->json([
                 'status'  => false,
                 'message' => 'Could not verify this payment with NearPay right now. It will be re-checked automatically.',

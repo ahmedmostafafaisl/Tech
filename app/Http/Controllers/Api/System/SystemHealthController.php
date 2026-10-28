@@ -46,7 +46,17 @@ class SystemHealthController extends Controller
             'database.password'   => config('database.connections.mysql.password'),
             // Environment for DY365 integration from db
             'dy_environment'       =>  DB::table('dy_environments')->where('is_default', 1)->value('url'),
+            //nearpay
+            'nearpay.api_key'       => config('services.nearpay.api_key'),
+            'nearpay.base_url'   => config('services.nearpay.base_url'),
+            'nearpay.environment'   => config('services.nearpay.environment'),
+            'nearpay.accounts_base_url' => config('services.nearpay.accounts_base_url'),
+            'nearpay.merchant_id'   => config('services.nearpay.merchant_id'),
+
+
         ];
+
+
 
         $results = collect($checks)->map(function ($value) {
             return [
