@@ -25,6 +25,7 @@ class PreAppointmentMessageIndexRequest extends FormRequest
             'customer_response' => 'nullable|in:pending,confirm,reschedule,cancel',
             'per_page'          => 'nullable|integer|min:1|max:1000',
             'currentPage'       => 'nullable|integer|min:1',
+            'delivery_status'    => 'nullable|string',
         ];
     }
 }

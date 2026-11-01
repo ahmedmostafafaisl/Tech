@@ -338,13 +338,11 @@ class DashboardRepository implements DashboardRepositoryInterface
         $total_confirmed   = (clone $query)->where('customer_response', 'confirm')->count();
         $total_rescheduled = (clone $query)->where('customer_response', 'reschedule')->count();
         $total_cancelled   = (clone $query)->where('customer_response', 'cancel')->count();
-
+        // 📨 Delivery status counts
+        $total_delivered    = (clone $query)->where('delivery_status', 'delivered')->count();
+        $total_failed       = (clone $query)->where('delivery_status', 'failed')->count();
         // 🎯 If exact identifiers provided → return latest single record
-        if (
-            $request->filled('sales_order') ||
-            $request->filled('book_id') ||
-            $request->filled('phone')
-        ) {
+        if ($request->filled('sales_order') || $request->filled('book_id') || $request->filled('phone') || $request->filled('delivery_status')) {
             $latestRecord = $query->first();
             $items = $this->withFormattedDates($latestRecord ? [$latestRecord] : [], asObjects: true);
 
@@ -362,6 +360,8 @@ class DashboardRepository implements DashboardRepositoryInterface
                     'total_confirmed'   => $total_confirmed,
                     'total_rescheduled' => $total_rescheduled,
                     'total_cancelled'   => $total_cancelled,
+                    'total_delivered'   => $total_delivered,
+                    'total_failed'      => $total_failed,
                 ],
             ];
         }
@@ -382,6 +382,8 @@ class DashboardRepository implements DashboardRepositoryInterface
             'total_confirmed'   => $total_confirmed,
             'total_rescheduled' => $total_rescheduled,
             'total_cancelled'   => $total_cancelled,
+            'total_delivered'   => $total_delivered,
+            'total_failed'      => $total_failed,
         ];
 
         return $result;

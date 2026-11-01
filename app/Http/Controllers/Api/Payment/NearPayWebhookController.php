@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Payment;
 
 use App\Jobs\ProcessNearPayWebhook;
 use App\Models\NearPayWebhook;
-use App\Services\Telegram\TelegramService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -33,11 +32,13 @@ class NearPayWebhookController extends \App\Http\Controllers\Controller
         }
 
         $payload = $request->json()->all();
+
         if (!is_array($payload) || empty($payload)) {
             return response()->json(['status' => false, 'message' => 'Invalid payload'], 400);
         }
 
         $data = $payload['payload'] ?? null;
+
         if (!is_array($data)) {
             // Acknowledge so NearPay doesn't retry a shape it will never send differently.
             return response()->json(['status' => true, 'message' => 'Ignored'], 200);
@@ -49,8 +50,15 @@ class NearPayWebhookController extends \App\Http\Controllers\Controller
             return response()->json(['status' => true, 'message' => 'Ignored'], 200);
         }
 
+        // transaction_uuid, NOT the top-level "id" — confirmed directly from a real, failed verification:
+        // GET /transactions/{id} returned "not found" when called with payload.id (that is this receipt's
+        // own id, not the transaction's), but succeeds with payload.transaction_uuid. "id" is kept only as a
+        // last-resort fallback for a delivery that is somehow missing transaction_uuid entirely — every real
+        // transaction payload seen so far always has it.
         $transactionId = $data['transaction_uuid'] ?? $data['id'] ?? null;
+
         if (!$transactionId) {
+
             return response()->json(['status' => true, 'message' => 'Ignored'], 200);
         }
 

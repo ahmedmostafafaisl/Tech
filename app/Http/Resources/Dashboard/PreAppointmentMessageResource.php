@@ -23,6 +23,8 @@ class PreAppointmentMessageResource extends JsonResource
             'is_sent'           => $this->is_sent,
             'response'          => $this->response,
             'dy_response'       => $this->dy_response,
+            'delivery_status'    => $this->delivery_status,
+            'delivery_error'       => $this->delivery_error,
             'flag'              => $this->flag,
             'customer_response' => $this->customer_response,
             'created_at'        => $this->created_at,

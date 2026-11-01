@@ -203,7 +203,6 @@ class DashboardController extends Controller
     public function getAllPreMessages(PreAppointmentMessageIndexRequest $request)
     {
         $authUser = Auth::user();
-
         if (!$authUser->can('view appointments')) {
             return $this->setCode(code: 401)
                 ->setData([])

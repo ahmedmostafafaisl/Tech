@@ -141,7 +141,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         }
 
         if (Setting::isActive('invoice_send_whatsapp_active', false)) {
-            $sentViaAny = $this->sendViaWhatsApp($whatsAppService, $whatsAppPlainService, $shortUrl, $evaluationLink) || $sentViaAny;
+            $sentViaAny = $this->sendViaWhatsApp($whatsAppService, $whatsAppPlainService, $shortUrl, $evaluationLink, $pdfUrl) || $sentViaAny;
         }
 
         if ($sentViaAny) {
@@ -190,14 +190,61 @@ class SendInvoiceLinkJob implements ShouldQueue
      *          within 24 hours of the customer's last message to the business; outside that window Meta
      *          rejects it, so this path can fail for a reason the template path never would.
      */
-    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, WhatsAppService $whatsAppPlainService, string $shortUrl, string $evaluationLink): bool
+    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, WhatsAppService $whatsAppPlainService, string $shortUrl, string $evaluationLink, string $pdfUrl): bool
     {
-        return Setting::isActive('invoice_whatsapp_use_template', true)
-            ? $this->sendViaWhatsAppTemplate($whatsAppService, $shortUrl, $evaluationLink)
+        $useTemplate = Setting::isActive('invoice_whatsapp_use_template', true);
+
+        // Every attempt is logged — not just failures (those already go to Telegram separately, from inside
+        // sendViaWhatsAppTemplate()/sendViaWhatsAppFreeform() themselves) — specifically WITH the settings
+        // snapshot, since "why did this send (or not send) the way it did" is almost always a question about
+        // which of these was on at the time, not about the send call itself.
+        $this->logWhatsAppAttempt($useTemplate);
+
+        $sent = $useTemplate
+            ? $this->sendViaWhatsAppTemplate($whatsAppService, $shortUrl, $evaluationLink, $pdfUrl)
             : $this->sendViaWhatsAppFreeform($whatsAppPlainService, $shortUrl);
+
+        TelegramService::send(
+            "📤 Invoice WhatsApp send " . ($sent ? 'succeeded' : 'failed') . "\n\n"
+                . "book_id: {$this->bookId}\n"
+                . "phone: {$this->phone}\n"
+                . "path: " . ($useTemplate ? 'template' : 'freeform')
+        );
+
+        return $sent;
     }
 
-    private function sendViaWhatsAppTemplate(WhatsAppConfirmationService $whatsAppService, string $shortUrl, string $evaluationLink): bool
+    /**
+     * All five settings this job's own class docblock documents as governing this flow — read fresh at send
+     * time (not cached/assumed), so what's logged is what was actually in effect for this specific attempt.
+     */
+    private function logWhatsAppAttempt(bool $useTemplate): void
+    {
+        $settings = [
+            'invoice_send_sms_active'         => Setting::isActive('invoice_send_sms_active', true) ? 'true' : 'false',
+            'invoice_send_whatsapp_active'    => Setting::isActive('invoice_send_whatsapp_active', false) ? 'true' : 'false',
+            'invoice_whatsapp_use_template'   => $useTemplate ? 'true' : 'false',
+            'invoice_whatsapp_template_name'  => Setting::where('key', 'invoice_whatsapp_template_name')->value('value') ?: '(not set)',
+            'invoice_use_new_template'        => Setting::isActive('invoice_use_new_template', false) ? 'true' : 'false',
+        ];
+
+        $lines = [
+            "📲 Invoice WhatsApp send attempt",
+            '',
+            "book_id: {$this->bookId}",
+            "phone: {$this->phone}",
+            '',
+            'Settings:',
+        ];
+
+        foreach ($settings as $key => $value) {
+            $lines[] = "{$key}: {$value}";
+        }
+
+        TelegramService::send(implode("\n", $lines));
+    }
+
+    private function sendViaWhatsAppTemplate(WhatsAppConfirmationService $whatsAppService, string $shortUrl, string $evaluationLink, string $pdfUrl): bool
     {
         $templateName = Setting::where('key', 'invoice_whatsapp_template_name')->value('value');
 
@@ -225,8 +272,18 @@ class SendInvoiceLinkJob implements ShouldQueue
             ->map(fn($value) => ['type' => 'text', 'text' => $value])
             ->all();
 
+        // The template's approved Document header — the PDF itself, not just a link to it, sent alongside
+        // the same body text as before. $pdfUrl (not $shortUrl) specifically: it's the direct, public
+        // /api/invoice/{bookId}/download endpoint, which is what actually serves the raw PDF bytes Meta's
+        // servers need to fetch — $shortUrl is the customer-facing redirect, not guaranteed to serve the
+        // file directly itself.
+        $documentHeader = [
+            'link'     => $pdfUrl,
+            'filename' => "Invoice-{$this->bookId}.pdf",
+        ];
+
         try {
-            $response = $whatsAppService->sendTemplateMessage($this->phone, $templateName, $bodyParameters);
+            $response = $whatsAppService->sendTemplateMessage($this->phone, $templateName, $bodyParameters, [], 'ar', $documentHeader);
         } catch (\Throwable $e) {
             Log::warning('SendInvoiceLinkJob: WhatsApp send failed', [
                 'book_id' => $this->bookId,

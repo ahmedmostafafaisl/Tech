@@ -17,7 +17,14 @@ class WhatsAppConfirmationService
         $this->token = config('services.whatsapp.token');
     }
 
-    public function sendTemplateMessage(string $to, string $templateName, array $bodyParameters = [], array $buttonParameters = [], string $lang = 'ar')
+    /**
+     * $documentHeader is for a template whose first component is an approved Document header on Meta's
+     * side (confirmed the invoice template has one) — ['link' => <publicly fetchable PDF URL>, 'filename' =>
+     * <name shown to the recipient>]. Sending this parameter against a template with no Document header
+     * (or sending none against a template that requires one) is rejected by Meta, so this must only be
+     * passed by a caller that has actually confirmed the specific template it names supports it.
+     */
+    public function sendTemplateMessage(string $to, string $templateName, array $bodyParameters = [], array $buttonParameters = [], string $lang = 'ar', ?array $documentHeader = null)
     {
         if (!\App\Models\Setting::isActive('whatsapp_send_messages_active', true)) {
             \Illuminate\Support\Facades\Log::info('WhatsApp send skipped — whatsapp_send_messages_active is off.', [
@@ -41,6 +48,21 @@ class WhatsAppConfirmationService
         }
 
         $components = [];
+
+        // document header — must be the FIRST component if present; Meta's template rendering follows the
+        // template's own component order (header, then body, then buttons), not the order they're added here
+        if (!empty($documentHeader['link'])) {
+            $components[] = [
+                "type"       => "header",
+                "parameters" => [[
+                    "type"     => "document",
+                    "document" => array_filter([
+                        "link"     => $documentHeader['link'],
+                        "filename" => $documentHeader['filename'] ?? null,
+                    ]),
+                ]],
+            ];
+        }
 
         // body parameters
         if (!empty($bodyParameters)) {
