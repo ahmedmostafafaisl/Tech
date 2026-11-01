@@ -33,6 +33,7 @@ class DirectAppointment extends Model
         'dy_required_amount',
         'used_balance',
         'paid_amount',
+        'related_book_id',
     ];
     protected $casts = [
         'discount' => 'float',

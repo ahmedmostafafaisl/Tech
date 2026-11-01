@@ -52,6 +52,9 @@ class SystemHealthController extends Controller
             'nearpay.environment'   => config('services.nearpay.environment'),
             'nearpay.accounts_base_url' => config('services.nearpay.accounts_base_url'),
             'nearpay.merchant_id'   => config('services.nearpay.merchant_id'),
+            //telegram
+            'telegram.bot_token'   => config('services.telegram.bot_token'),
+            'telegram.chat_id'     => config('services.telegram.chat_id'),
 
 
         ];

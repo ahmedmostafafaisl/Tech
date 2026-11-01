@@ -24,6 +24,7 @@ class PaymentCompletionDispatcher
         }
         $appointmentData = $this->getAppointmentDataFromDynamics($appointment);
         $required = (float) ($appointmentData['required_amount'] ?? 0);
+        $relatedBookId = $appointment->related_book_id ?? null;
 
         // ✅ New required_amount calculation (Step 4 — same shared
         // calculator/flag as sendPaymentLinks/completeAppointment/
@@ -209,10 +210,8 @@ class PaymentCompletionDispatcher
                 'PaidAmount'        => $paidAmountForBody,
                 'UsedBalance'       => $usedBalanceApplied ?? 0,
                 'SalesLines'        => $salesLines,
-                // ⚠ FIXED (again — this reverted back to the typo in a
-                // fresh clone since the earlier fix only ever existed as
-                // a file, never actually landed in the real repo):
                 'InstalltionStatus' => $installmentStatus,
+                'relatedBookId'     => $relatedBookId,
             ], $serialPayload),
         ];
 

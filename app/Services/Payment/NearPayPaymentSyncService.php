@@ -4,6 +4,7 @@ namespace App\Services\Payment;
 
 use App\Models\DirectAppointment;
 use App\Models\DirectAppointmentPayment;
+use App\Services\Telegram\TelegramService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -41,6 +42,8 @@ class NearPayPaymentSyncService
         $previousStatus = $payment->status;
 
         if (!$payment->payment_id) {
+            TelegramService::send('NearPay syncPayment error: transaction ID is missing for reference_id ' . $payment->reference_id);
+
             throw new \RuntimeException('NearPay transaction ID is missing on this payment record.');
         }
 
@@ -55,6 +58,8 @@ class NearPayPaymentSyncService
                 'reference_id' => $payment->reference_id,
             ]);
 
+            TelegramService::send('NearPay syncPayment: transaction not found (yet) for payment_id ' . $payment->payment_id . ', reference_id ' . $payment->reference_id);
+
             return $this->unchanged($payment, $previousStatus, 'not_found');
         }
 
@@ -67,6 +72,15 @@ class NearPayPaymentSyncService
             'verdict'         => $result['verdict'],
             'reason'          => $result['reason'],
         ]);
+
+        TelegramService::send(
+            "NearPay syncPayment:\n"
+                . "payment_id: {$payment->payment_id}\n"
+                . "reference_id: {$payment->reference_id}\n"
+                . "previous_status: {$previousStatus}\n"
+                . "verdict: {$result['verdict']}\n"
+                . "reason: {$result['reason']}"
+        );
 
         switch ($result['verdict']) {
             case NearPayTransactionVerification::PAID:

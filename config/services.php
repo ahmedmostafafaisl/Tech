@@ -39,10 +39,18 @@ return [
     ],
     'nearpay' => [
         'base_url'        => env('NEARPAY_BASE_URL'),     // e.g. https://sandbox-api.nearpay.io/v1/banks-sdk/
+        // The Accounts API (terminal create/assign/unassign) is a different base path under the same host
+        // and the same api-key — NEARPAY_BASE_URL above already has /banks-sdk/ baked in, so it can't be
+        // reused directly for /terminals without producing the wrong URL. Set this to whatever {{base_url}}
+        // the Accounts API's own Postman collection uses (e.g. https://sandbox-api.nearpay.io/v1/accounts).
+        'accounts_base_url' => env('NEARPAY_ACCOUNTS_BASE_URL'),
         'api_key'         => env('NEARPAY_API_KEY'),
         'environment'     => env('NEARPAY_ENVIRONMENT', 'sandbox'),
         'timeout'         => (int) env('NEARPAY_HTTP_TIMEOUT', 20),
         'connect_timeout' => (int) env('NEARPAY_HTTP_CONNECT_TIMEOUT', 5),
+        // Accounts API's merchant_id for Create Terminal — fixed per Naqi's own NearPay account, not
+        // something a caller should ever supply per-request.
+        'merchant_id'     => env('NEARPAY_MERCHANT_ID'),
     ],
     'tabby' => [
         'secret_key'    => env('TABBY_SECRET_KEY'),      // no default: a missing key must fail loudly, never silently fall back to a stale one

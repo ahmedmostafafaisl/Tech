@@ -208,24 +208,40 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
      * reference_id; payment_id is NearPay's transaction id, verified server-side exactly like confirm()
      * does — a client-reported outcome is never trusted on its own.
      */
+    /**
+     * Every exit from this endpoint is logged to Telegram — the incoming payload up front, then whichever
+     * outcome actually happens (not found, unauthorized, claim conflict, verification failure, or success).
+     * This is a brand-new, higher-risk integration path, so the point is full visibility into every call,
+     * not just the failure cases.
+     */
     public function handleNfcResponse(HandleNfcPaymentResponseRequest $request)
     {
         $validated = $request->validated();
+
+        // TelegramService::send("NFC payment response received.\nPayload: " . json_encode($validated, JSON_UNESCAPED_UNICODE));
 
         $payment = DirectAppointmentPayment::where('reference_id', $validated['customer_reference_number'])
             ->where('payment_type', 'NEARPAY')
             ->first();
 
         if (!$payment) {
+            // TelegramService::send('NFC payment response: payment not found for customer_reference_number ' . $validated['customer_reference_number']);
+
             return response()->json(['status' => false, 'message' => 'Payment not found.'], 404);
         }
 
         $appointment = $payment->directAppointment;
 
-        $this->checkCompleteService->authorizeTechOrFail(
-            $appointment?->tech_id,
-            "Unauthorized NFC payment response for customer_reference_number {$validated['customer_reference_number']}"
-        );
+        try {
+            $this->checkCompleteService->authorizeTechOrFail(
+                $appointment?->tech_id,
+                "Unauthorized NFC payment response for customer_reference_number {$validated['customer_reference_number']}"
+            );
+        } catch (\Throwable $e) {
+            TelegramService::send('NFC payment response: unauthorized for reference_id ' . $payment->reference_id . '. Error: ' . $e->getMessage());
+
+            throw $e;
+        }
 
         $claim = $this->claimTransaction(
             $payment,
@@ -235,15 +251,17 @@ class NearPayPaymentController extends \App\Http\Controllers\Controller
         );
 
         if (!$claim['ok']) {
+            // TelegramService::send('NFC payment response: claim failed for reference_id ' . $payment->reference_id . '. Reason: ' . $claim['message']);
+
             return response()->json(['status' => false, 'message' => $claim['message']], 409);
         }
 
         try {
             $result = $this->syncService->syncPayment($payment->fresh());
-            TelegramService::send('NFC payment response:result ' . json_encode($result) . ' for reference_id ' . $payment->reference_id);
+            // TelegramService::send('NFC payment response: result ' . json_encode($result) . ' for reference_id ' . $payment->reference_id);
         } catch (\Throwable $e) {
-
             TelegramService::send('NFC payment response: verification failed for reference_id ' . $payment->reference_id . '. Error: ' . $e->getMessage());
+
             return response()->json([
                 'status'  => false,
                 'message' => 'Could not verify this payment with NearPay right now. It will be re-checked automatically.',

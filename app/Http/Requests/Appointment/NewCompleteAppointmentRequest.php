@@ -31,6 +31,8 @@ class NewCompleteAppointmentRequest extends FormRequest
 
             // Only required when order_type is تركيب (installation).
             'InstallmentStatus'            => 'required_if:order_type,تركيب|nullable|string|in:Completed,Need_installation',
+            // related book id
+            'related_book_id'              => 'nullable|string',
 
             'items'                        => 'nullable|array',
             'items.*.SaleslineId'          => 'required|integer',

@@ -14,9 +14,12 @@ namespace App\Services\Payment;
  *   - A refund is NOT a separate transaction state — the docs are explicit that it is the SAME "approved"
  *     shape with is_refunded: true on that receipt, so REFUNDED is checked before treating is_approved as
  *     a plain paid purchase.
- *   - amount_authorized.value and currency.english are both STRINGS. Compared with bcmath (bccomp), never
- *     as floats, per the exact-decimal requirement — a float comparison of monetary strings is exactly the
- *     class of bug that lets a fraction-of-a-cent rounding difference silently pass as "paid".
+ *   - amount_authorized.value and currency.english are both STRINGS. Compared as exact integer cents
+ *     (toCents(), below), never as floats and never via ext-bcmath — a float comparison of monetary strings
+ *     is exactly the class of bug that lets a fraction-of-a-cent rounding difference silently pass as
+ *     "paid", and the bcmath-based approach this replaced specifically failed in production with an
+ *     "undefined function" fatal error for the bcmath comparison function (the bcmath extension is not
+ *     installed there) — this class must not assume any extension beyond what PHP ships with by default.
  */
 final class NearPayTransactionVerification
 {
@@ -113,9 +116,33 @@ final class NearPayTransactionVerification
             return 'the amount could not be compared as an exact decimal value';
         }
 
-        return bccomp((string) $actual, $expectedAmount, 2) === 0
+        return self::toCents((string) $actual) === self::toCents($expectedAmount)
             ? true
             : "amount does not match this payment (NearPay: {$actual}, expected: {$expectedAmount})";
+    }
+
+    /**
+     * Converts an already-validated (isDecimalString()) decimal string to an exact integer number of cents,
+     * via pure string manipulation — no float cast anywhere, no ext-bcmath dependency. Truncates (never
+     * rounds) anything past 2 decimal places, matching the previous bcmath comparison's own truncate-then-
+     * compare semantics at that same scale exactly, so this is a drop-in behavioural replacement, not just
+     * "close enough".
+     */
+    private static function toCents(string $decimal): int
+    {
+        $decimal = trim($decimal);
+        $negative = str_starts_with($decimal, '-');
+
+        if ($negative) {
+            $decimal = substr($decimal, 1);
+        }
+
+        [$whole, $fraction] = array_pad(explode('.', $decimal, 2), 2, '');
+        $fraction = str_pad(substr($fraction, 0, 2), 2, '0', STR_PAD_RIGHT);
+
+        $cents = ((int) $whole) * 100 + (int) $fraction;
+
+        return $negative ? -$cents : $cents;
     }
 
     /** @return true|string */

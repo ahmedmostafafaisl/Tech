@@ -30,6 +30,7 @@ class TodayAppointmentsRequest extends FormRequest
             'pageSize'    => 'required|integer|min:1|max:100',
             'status'      => 'nullable|string',
             'shift'       => 'nullable|string',
+            'book_id'  => 'nullable|string',
         ];
     }
 
@@ -45,6 +46,7 @@ class TodayAppointmentsRequest extends FormRequest
             'pageSize.required'    => 'Page size is required.',
             'pageSize.min'         => 'Page size must be at least 1.',
             'pageSize.max'         => 'Page size must not exceed 100.',
+            'book_id.string'       => 'Book ID must be a string.',
         ];
     }
 }

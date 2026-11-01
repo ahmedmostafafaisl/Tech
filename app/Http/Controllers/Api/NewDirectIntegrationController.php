@@ -89,6 +89,7 @@ class NewDirectIntegrationController extends Controller
         $this->checkCompleteService = $checkCompleteService;
     }
 
+
     public function todayAppointments(TodayAppointmentsRequest $request)
     {
         $payload = [
@@ -108,27 +109,68 @@ class NewDirectIntegrationController extends Controller
             ], 503);
         }
 
-        if (isset($response['Status']) && $response['Status'] === true && isset($response['Data']['Appointments'])) {
+        if (
+            isset($response['Status']) &&
+            $response['Status'] === true &&
+            isset($response['Data']['Appointments'])
+        ) {
             $authenticatedUser = Auth::user();
 
+            // Start with the appointments returned by Dynamics.
+            $appointmentsData = collect($response['Data']['Appointments']);
+
+            /*
+         * If book_id is provided, find the target appointment
+         * and keep only appointments belonging to the same customer.
+         */
+            if ($request->filled('book_id')) {
+                $targetAppointment = $appointmentsData->first(
+                    fn($appointment) =>
+                    (string) ($appointment['BookId'] ?? '') ===
+                        (string) $request->book_id
+                );
+
+                if (!$targetAppointment) {
+                    $response['Data']['Appointments'] = [];
+                    $response['Data']['StatusCounts'] = [];
+                    $response['Data']['ShiftCounts'] = [];
+
+                    return $this->setCode(200)
+                        ->setData($response)
+                        ->setMessage('Success.')
+                        ->send();
+                }
+
+                $customerId = $targetAppointment['CustomerId'] ?? null;
+
+                $appointmentsData = $appointmentsData->filter(
+                    fn($appointment) =>
+                    (string) ($appointment['BookId'] ?? '') !== (string) $request->book_id &&
+                        $customerId !== null &&
+                        (string) ($appointment['CustomerId'] ?? '') === (string) $customerId
+                );
+            }
+
+            // Get favorite appointment sales order IDs.
             $favoriteIds = $authenticatedUser
                 ->favoriteAppointments()
                 ->pluck('sales_order_id')
                 ->toArray();
 
-            // ── Pre-fetch change request book IDs from all appointments ───────────
-            $allBookIds = collect($response['Data']['Appointments'])
+            // Get BookIds only from the filtered appointments.
+            $allBookIds = $appointmentsData
                 ->pluck('BookId')
                 ->filter()
                 ->unique()
+                ->values()
                 ->toArray();
 
             $changeRequestBookIds = ChangeRequest::whereIn('book_id', $allBookIds)
                 ->pluck('book_id')
                 ->toArray();
 
-            // ── Normalize and add favorite flag ───────────────────────────────────
-            $appointments = collect($response['Data']['Appointments'])
+            // Normalize status and add favorite flag.
+            $appointments = $appointmentsData
                 ->map(function ($appointment) use ($favoriteIds) {
                     $appointment = $this->normalizeAppointmentStatus($appointment);
 
@@ -138,42 +180,47 @@ class NewDirectIntegrationController extends Controller
 
                     return $appointment;
                 })
-                // ── Exclude Deferral/Canceled if BookId not in change requests ────
                 ->filter(function ($appointment) use ($changeRequestBookIds) {
                     $status = $appointment['Status'] ?? null;
 
                     if (in_array($status, ['Deferral', 'Canceled'], true)) {
-                        return in_array($appointment['BookId'] ?? null, $changeRequestBookIds);
+                        return in_array(
+                            $appointment['BookId'] ?? null,
+                            $changeRequestBookIds
+                        );
                     }
 
-                    return true; // all other statuses pass through
+                    return true;
                 });
 
-            // ── Filter by status ──────────────────────────────────────────────────
+            // Filter by status if provided.
             if ($request->filled('status')) {
                 $appointments = $appointments->filter(
-                    fn($a) => ($a['Status'] ?? null) === $request->status
+                    fn($appointment) => ($appointment['Status'] ?? null) === $request->status
                 );
             }
 
-            // ── Filter by shift ───────────────────────────────────────────────────
+            // Filter by shift if provided.
             if ($request->filled('shift')) {
                 $appointments = $appointments->filter(
-                    fn($a) => ($a['ShiftNameId'] ?? null) === $request->shift
+                    fn($appointment) => ($appointment['ShiftNameId'] ?? null) === $request->shift
                 );
             }
 
-            // ── Sort ──────────────────────────────────────────────────────────────
+            // Sort appointments by start time.
             $appointments = $appointments
                 ->sortBy(fn($item) => strtotime($item['FromTime'] ?? ''))
                 ->values();
 
-            // ── Stats AFTER filtering ─────────────────────────────────────────────
-            $statusCounts = $appointments->groupBy(fn($a) => $a['Status'] ?? 'unknown')
+            // Count appointments by status.
+            $statusCounts = $appointments
+                ->groupBy(fn($appointment) => $appointment['Status'] ?? 'unknown')
                 ->map(fn($group) => $group->count())
                 ->toArray();
 
-            $shiftCounts = $appointments->groupBy(fn($a) => $a['ShiftNameId'] ?? 'unknown')
+            // Count appointments by shift.
+            $shiftCounts = $appointments
+                ->groupBy(fn($appointment) => $appointment['ShiftNameId'] ?? 'unknown')
                 ->map(fn($group) => $group->count())
                 ->toArray();
 
@@ -187,6 +234,7 @@ class NewDirectIntegrationController extends Controller
             ->setMessage('Success.')
             ->send();
     }
+
 
     public function singleAppointment2($sales_order_id)
     {
@@ -2803,6 +2851,7 @@ class NewDirectIntegrationController extends Controller
         $total_price = (float) ($validatedData['total_price'] ?? 0);
         $InstallmentStatus = $validatedData['InstallmentStatus'] ?? null;
         $items = $validatedData['items'] ?? [];
+        $related_book_id = $validatedData['related_book_id'] ?? null;
 
         $logService = app(TechnicianAppointmentLogService::class);
 
@@ -3060,6 +3109,7 @@ class NewDirectIntegrationController extends Controller
                     'complete_flag' => 0,
                     'status' => 'pending',
                     'installment_status' => $InstallmentStatus,
+                    'related_book_id' => $related_book_id,
                 ]
             );
 
@@ -3072,6 +3122,7 @@ class NewDirectIntegrationController extends Controller
                 'total_price' => 0,
                 'status' => 'paid',
                 'installment_status' => $InstallmentStatus,
+                'related_book_id' => $related_book_id,
             ]);
 
             // ✅ Save sales lines with max_quantity

@@ -26,6 +26,7 @@ class AppointmentFormSubmissionController extends Controller
         $validated    = $request->validated();
         $salesOrderId = $validated['sales_order_id'];
         $bookId       = $validated['book_id'];
+        $related_book_id = $validated['related_book_id'] ?? null;
 
         // Time box. The Dynamics send itself is already a background command
         // (DB::afterCommit in the service), so what made this endpoint time out was
@@ -56,6 +57,12 @@ class AppointmentFormSubmissionController extends Controller
                 ->where('book_id', $bookId)
                 ->orderByDesc('id')
                 ->first();
+
+            // update related_book_id if provided in the request
+            if ($related_book_id) {
+                $appointment->related_book_id = $related_book_id;
+                $appointment->save();
+            }
 
             if (!$appointment) {
                 return response()->json([

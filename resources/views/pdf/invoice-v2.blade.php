@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="ltr">
 
 <head>
     <meta charset="UTF-8">
@@ -11,11 +11,18 @@
             box-sizing: border-box;
         }
 
+        /* Document root is LTR deliberately — every element here (barcode, title, logo in the header;
+           every table column; the terms' two columns) was written in the same left-to-right source order
+           the approved sample shows visually. An RTL root mirrors that whole order (tables render their
+           first column on the right, not the left), which is what caused the fully reversed layout this
+           fixes. Arabic text itself still displays correctly: individual Arabic runs use .bdi
+           (unicode-bidi: isolate) or an explicit direction: rtl (see .ar-col below) so they shape and flow
+           correctly without affecting the structural layout around them. */
         body {
             font-family: Arial, sans-serif;
-            font-size: 10px;
-            color: #222;
-            direction: rtl;
+            font-size: 9px;
+            color: #1a1a1a;
+            direction: ltr;
             line-height: 1.4;
         }
 
@@ -23,106 +30,186 @@
             unicode-bidi: isolate;
         }
 
-        /* ===== HEADER ===== */
+        .ltr {
+            direction: ltr;
+            unicode-bidi: isolate;
+        }
+
+        /* ===== HEADER (page 1) ===== */
         .header-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 6px;
+            margin-bottom: 10px;
         }
 
         .header-table td {
+            border: none;
+            vertical-align: top;
+            padding: 0;
+        }
+
+        .barcode-cell {
+            width: 30%;
+            text-align: center;
+        }
+
+        .barcode-cell img {
+            max-width: 180px;
+            max-height: 40px;
+        }
+
+        .barcode-number {
+            font-size: 9px;
+            letter-spacing: 1px;
+            margin-top: 2px;
+            direction: ltr;
+        }
+
+        .title-cell {
+            width: 40%;
+            text-align: center;
+        }
+
+        .invoice-title-ar {
+            font-size: 16px;
+            font-weight: bold;
+            color: #0a0a0a;
+        }
+
+        .invoice-title-en {
+            font-size: 10px;
+            color: #444;
+            direction: ltr;
+        }
+
+        .invoice-subtitle {
+            font-size: 9px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .logo-cell {
+            width: 30%;
+            text-align: right;
+        }
+
+        .logo-cell img {
+            max-width: 120px;
+            max-height: 90px;
+        }
+
+        .logo-company-name {
+            font-size: 10px;
+            font-weight: bold;
+            color: #0a0a0a;
+            margin-top: 2px;
+        }
+
+        .logo-company-name-en {
+            font-size: 8px;
+            color: #666;
+            direction: ltr;
+        }
+
+        .logo-tagline {
+            font-size: 7px;
+            color: #999;
+        }
+
+        /* ===== PAGE 2 HEADER ===== */
+        /* Same logo + company name/tagline block as the page-1 header's .logo-cell, just positioned on the
+           left here instead of the right — matches the approved sample's page-2 header exactly. */
+        .header2-table {
+            width: 100%;
+            border-collapse: collapse;
+            border-bottom: 1.5px solid #222;
+            padding-bottom: 10px;
+            margin-bottom: 14px;
+        }
+
+        .header2-table td {
             border: none;
             vertical-align: middle;
             padding: 0;
         }
 
-        .logo-cell {
-            width: 25%;
-            text-align: center;
+        .header2-logo-cell {
+            width: 50%;
+            text-align: left;
         }
 
-        .logo-cell img {
-            max-width: 110px;
-            max-height: 65px;
+        .header2-logo-cell img {
+            max-width: 60px;
+            max-height: 45px;
         }
 
-        .title-cell {
-            width: 75%;
-            text-align: center;
+        .header2-title-cell {
+            width: 50%;
+            text-align: right;
         }
 
-        .invoice-title-ar {
-            font-size: 15px;
+        .header2-title {
+            font-size: 12px;
             font-weight: bold;
-            color: #111;
+            color: #0a0a0a;
         }
 
-        .invoice-title-en {
-            font-size: 11px;
-            color: #333;
-            direction: ltr;
-        }
-
-        .invoice-subtitle {
-            font-size: 10px;
-            color: #777;
+        .header2-sub {
+            font-size: 9px;
+            color: #666;
             margin-top: 2px;
         }
 
-        /* ===== STORE INFO BAR ===== */
-        .store-bar {
+        /* ===== INFO BAR ===== */
+        table.info-bar {
             width: 100%;
-            border: 1px solid #ccc;
+            border: 1px solid #333;
             border-collapse: collapse;
             margin-bottom: 8px;
         }
 
-        .store-bar td {
-            border: 1px solid #ccc;
-            padding: 5px 8px;
-            font-size: 10px;
+        table.info-bar td {
+            border: 1px solid #333;
+            padding: 4px 6px;
             vertical-align: top;
+            font-weight: bold;
         }
 
-        .store-bar .label {
-            color: #555;
+        .info-label {
             display: block;
-            font-size: 9px;
+            font-size: 7.5px;
+            color: #666;
         }
 
-        .store-bar .value {
+        .info-value {
             font-weight: bold;
             color: #111;
+            font-size: 9px;
         }
 
-        /* ===== TABLES ===== */
-        table.items-table,
-        table.totals-table,
-        table.payments-table {
+        /* ===== ITEMS TABLE ===== */
+        table.items-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
         table.items-table th,
-        table.items-table td,
-        table.payments-table th,
-        table.payments-table td {
-            border: 1px solid #ccc;
-            padding: 5px 6px;
+        table.items-table td {
+            border: 1px solid #333;
+            padding: 4px 5px;
             text-align: center;
-        }
-
-        table.items-table th,
-        table.payments-table th {
-            background: #ededed;
             font-weight: bold;
-            font-size: 9px;
-            line-height: 1.6;
         }
 
-        table.items-table th .en,
-        table.payments-table th .en {
+        table.items-table th {
+            background: #d9d9d9;
+            font-weight: bold;
+            font-size: 7.5px;
+            line-height: 1.5;
+        }
+
+        table.items-table th .en {
             display: block;
             direction: ltr;
             font-weight: normal;
@@ -136,329 +223,530 @@
         table.items-table td.desc .en {
             direction: ltr;
             display: block;
-            color: #555;
-            font-size: 9px;
+        }
+
+        table.items-table td.desc .ar {
+            display: block;
+            color: #444;
         }
 
         .items-total-row td {
-            background: #ededed;
+            background: #d9d9d9;
             font-weight: bold;
-            border: 1px solid #ccc;
-            padding: 5px 6px;
+            border: 1px solid #333;
+            padding: 4px 5px;
             text-align: center;
         }
 
-        /* ===== TOTALS + QR BLOCK ===== */
-        .totals-wrap {
+        /* ===== VAT SUMMARY + PAYMENT DETAILS ===== */
+        /* border-collapse: separate + border-spacing is what actually creates a gap BETWEEN the two cells
+           here — padding on a cell only adds space on that cell's own inside edge, never between sibling
+           cells in a collapsed-border table, which is why the two tables below were touching directly with
+           no visible gap at all. */
+        .summary-wrap {
             width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 8px;
+            border-collapse: separate;
+            border-spacing: 10px 0;
+            margin: 0 -10px 8px -10px;
         }
 
-        .totals-wrap>tr>td {
-            border: none;
-            vertical-align: top;
-            padding: 0;
-        }
-
-        table.totals-table td {
-            border: 1px solid #ccc;
-            padding: 4px 8px;
-            font-size: 10px;
-        }
-
-        table.totals-table td.t-label {
-            text-align: right;
-            background: #f5f5f5;
-            font-weight: bold;
-            width: 55%;
-        }
-
-        table.totals-table td.t-value {
-            text-align: left;
-            direction: ltr;
-            width: 45%;
-        }
-
-        table.totals-table tr.grand-total td {
-            background: #ededed;
-            font-weight: bold;
-            font-size: 11px;
-        }
-
-        .qr-cell {
-            width: 110px;
-            text-align: center;
-            vertical-align: top;
-            padding-right: 10px;
-        }
-
-        .qr-cell img {
-            width: 95px;
-            height: 95px;
-            border: 1px solid #ccc;
-            padding: 4px;
-        }
-
-        /* ===== VAT ID LINE ===== */
-        .tax-ids {
-            text-align: center;
-            font-size: 9px;
-            color: #333;
-            border-top: 1px solid #ddd;
-            border-bottom: 1px solid #ddd;
-            padding: 5px 0;
-            margin-bottom: 10px;
-        }
-
-        /* ===== TERMS ===== */
-        .terms-wrap {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }
-
-        .terms-wrap td {
+        .summary-wrap>tr>td {
             border: none;
             vertical-align: top;
             padding: 0;
             width: 50%;
-            font-size: 9px;
+        }
+
+        table.vat-summary,
+        table.payment-details {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #333;
+        }
+
+        table.vat-summary caption,
+        table.payment-details caption {
+            background: #d9d9d9;
+            font-weight: bold;
+            font-size: 8.5px;
+            padding: 4px 6px;
+            text-align: center;
+            caption-side: top;
+            border: 1px solid #333;
+            border-bottom: none;
+        }
+
+        table.vat-summary th,
+        table.vat-summary td,
+        table.payment-details th,
+        table.payment-details td {
+            border: 1px solid #333;
+            padding: 3px 6px;
+            font-size: 8.5px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        table.vat-summary th {
+            background: #d9d9d9;
+            font-size: 7.5px;
+        }
+
+        table.vat-summary tr.total-row td {
+            font-weight: bold;
+            background: #d9d9d9;
+        }
+
+        table.payment-details td.pd-label {
+            text-align: right;
+            font-weight: bold;
+            background: #d9d9d9;
+        }
+
+        table.payment-details td.pd-value {
+            text-align: left;
+            direction: ltr;
+        }
+
+        table.payment-details tr.pd-total td {
+            font-weight: bold;
+        }
+
+        /* ===== TAX IDS + QR ===== */
+        .tax-ids-wrap {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+
+        .tax-ids-wrap td {
+            border: none;
+            vertical-align: top;
+            padding: 0;
+        }
+
+        .tax-ids-text {
+            font-size: 8px;
             line-height: 1.8;
         }
 
-        .terms-wrap td.en-col {
-            direction: ltr;
-            text-align: left;
-            padding-left: 10px;
+        .tax-legend {
+            font-size: 7.5px;
+            color: #555;
+            margin-top: 2px;
         }
 
-        .terms-wrap td.ar-col {
+        .qr-cell {
+            width: 85px;
+            text-align: left;
+        }
+
+        .qr-cell img {
+            width: 75px;
+            height: 75px;
+        }
+
+        /* ===== COMPANY LINE ===== */
+        table.company-line {
+            width: 100%;
+            border-collapse: collapse;
+            border-top: 1.5px solid #222;
+            border-bottom: 1.5px solid #222;
+            margin-bottom: 10px;
+        }
+
+        .company-line td {
+            border: none;
+            padding: 6px 0;
+            font-size: 7.5px;
+            font-weight: bold;
+            color: #1a1a1a;
+            vertical-align: top;
+            width: 33.33%;
+        }
+
+        .company-line .cl-en {
+            text-align: left;
+            direction: ltr;
+        }
+
+        .company-line .cl-mid {
+            text-align: center;
+            direction: ltr;
+        }
+
+        .company-line .cl-ar {
+            text-align: right;
+        }
+
+        /* ===== TERMS ===== */
+        .terms-heading {
+            font-size: 9px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        table.terms-wrap {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table.terms-wrap td {
+            border: none;
+            vertical-align: top;
+            padding: 0;
+            width: 50%;
+            font-size: 8px;
+            line-height: 1.7;
+        }
+
+        table.terms-wrap td.en-col {
+            direction: ltr;
+            text-align: left;
+            padding-left: 6px;
+        }
+
+        table.terms-wrap td.ar-col {
             direction: rtl;
             text-align: right;
-            padding-right: 10px;
+            padding-right: 6px;
         }
 
         .terms-list {
             list-style: none;
         }
 
+        .terms-list li {
+            margin-bottom: 4px;
+        }
+
+        .terms-list .num {
+            font-weight: bold;
+        }
+
+        .page-break {
+            page-break-before: always;
+        }
+
         /* ===== FOOTER ===== */
-        .footer-bar {
+        .footer-note {
+            text-align: center;
+            font-size: 8px;
+            color: #555;
+            border-top: 1px solid #ccc;
+            padding-top: 6px;
+            margin-top: 10px;
+        }
+
+        .page-num {
+            text-align: left;
+            font-size: 8px;
+            color: #777;
+            direction: ltr;
+        }
+
+        table.footer-bar {
             width: 100%;
             border-collapse: collapse;
-            border-top: 1px solid #ccc;
-            margin-top: 12px;
+            border-top: 1.5px solid #222;
+            border-bottom: 1.5px solid #222;
+            margin-top: 14px;
         }
 
         .footer-bar td {
             border: none;
-            padding-top: 8px;
-            font-size: 10px;
-            color: #333;
+            padding: 8px 0;
+            font-size: 9px;
+            color: #1a1a1a;
             width: 33.33%;
             vertical-align: middle;
         }
 
         .footer-ar {
             text-align: right;
+            font-weight: bold;
         }
 
         .footer-mid {
             text-align: center;
             direction: ltr;
-            color: #00a651;
-            font-weight: bold;
+            font-weight: normal;
         }
 
         .footer-en {
             text-align: left;
             direction: ltr;
+            font-weight: bold;
         }
     </style>
 </head>
 
 <body>
 
-    {{-- ===== HEADER ===== --}}
+    {{-- ========================= PAGE 1 ========================= --}}
+
     <table class="header-table">
         <tr>
+            <td class="barcode-cell">
+                {{-- No barcode library is installed (declined earlier when asked) — this stays text-only
+                unless a barcodeSrc is explicitly passed in, so nothing renders as a broken image. --}}
+                @if(!empty($barcodeSrc))
+                    <img src="{{ $barcodeSrc }}" alt="Barcode">
+                @endif
+                <div class="barcode-number">{{ $invoice['number'] ?? '-' }}</div>
+            </td>
             <td class="title-cell">
-                <div class="invoice-title-ar">{{ $labels['invoice_title'] ?? 'فاتورة ضريبية مبسطة' }}</div>
-                <div class="invoice-title-en">{{ $labels['invoice_title_en'] ?? 'Digital Invoice' }}</div>
-                <div class="invoice-subtitle">{{ $labels['invoice_subtitle'] ?? 'نسخة إلكترونية' }}</div>
+                <div class="invoice-title-ar">فاتورة ضريبية مبسطة</div>
+                <div class="invoice-title-en">Simplified Tax Invoice</div>
+                <div class="invoice-subtitle">نسخة إلكترونية · Digital Invoice</div>
             </td>
             <td class="logo-cell">
                 <img src="{{ $logoSrc }}" alt="Logo">
+                <div class="logo-company-name">{{ $invoice['company']['name_ar'] ?? '-' }}</div>
+                <div class="logo-company-name-en">{{ $invoice['company']['name_en'] ?? '-' }}</div>
+                <div class="logo-tagline bdi">{{ $invoice['company']['tagline'] ?? '' }}</div>
             </td>
         </tr>
     </table>
 
-    {{-- ===== STORE / INVOICE INFO BAR ===== --}}
-    <table class="store-bar">
+    <table class="info-bar">
         <tr>
-            <td style="width:34%;">
-                <span class="label">{{ $invoice['company']['name_ar'] ?? '-' }}</span>
-                <span class="value bdi">{{ $invoice['company']['name_en'] ?? '-' }}</span>
-            </td>
-            <td style="width:33%;">
-                <span class="label">رقم الفاتورة - Invoice No.</span>
-                <span class="value bdi">{{ $invoice['number'] ?? '-' }}</span>
-            </td>
-            <td style="width:33%;">
-                <span class="label">التاريخ والوقت - Date &amp; Time</span>
-                <span class="value bdi">{{ $invoice['date'] ?? '-' }}</span>
-            </td>
+            <td style="width:25%;"><span class="info-label">Invoice No. · رقم الفاتورة</span><span
+                    class="info-value ltr">{{ $invoice['number'] ?? '-' }}</span></td>
+            <td style="width:25%;"><span class="info-label">Date · التاريخ</span><span
+                    class="info-value ltr">{{ $invoice['date'] ?? '-' }}</span></td>
+            <td style="width:25%;"><span class="info-label">Time · الوقت</span><span
+                    class="info-value ltr">{{ $invoice['time'] ?? '-' }}</span></td>
+            <td style="width:25%;"><span class="info-label">Invoice Type · نوع الفاتورة</span><span
+                    class="info-value">SALE · بيع</span></td>
+        </tr>
+        <tr>
+            <td><span class="info-label">Customer · العميل</span><span
+                    class="info-value bdi">{{ $invoice['customer']['name'] ?? '-' }}</span></td>
+            <td><span class="info-label">Customer VAT No. · الرقم الضريبي للعميل</span><span
+                    class="info-value">{{ $invoice['customer']['vat_no'] ?? '—' }}</span></td>
+            <td><span class="info-label">Territory · النطاق الجغرافي</span><span
+                    class="info-value bdi">{{ $invoice['customer']['territory'] ?? '—' }}</span></td>
+            <td><span class="info-label">Sales Person · اسم البائع</span><span
+                    class="info-value bdi">{{ $invoice['sales_person'] ?: '—' }}</span></td>
+        </tr>
+        <tr>
+            <td colspan="4"><span class="info-label">Customer Address · عنوان العميل</span><span
+                    class="info-value bdi">{{ $invoice['customer']['address'] ?? '-' }}</span></td>
         </tr>
     </table>
 
-    {{-- ===== ITEMS TABLE ===== --}}
     <table class="items-table">
         <thead>
             <tr>
-                <th style="width:40%;">الصنف<span class="en">Item</span></th>
-                <th style="width:12%;">الكمية<span class="en">QTY</span></th>
-                <th style="width:16%;">سعر الوحدة<span class="en">Unit Price</span></th>
-                <th style="width:16%;">القيمة<span class="en">Value</span></th>
-                <th style="width:16%;">الاجمالي<span class="en">Total</span></th>
+                <th style="width:3%;">#</th>
+                <th style="width:28%;">الوصف<span class="en">Description</span></th>
+                <th style="width:7%;">الكمية<span class="en">QTY</span></th>
+                <th style="width:12%;">سعر الوحدة<span class="en">Unit Price excl. VAT</span></th>
+                <th style="width:10%;">القيمة<span class="en">Value</span></th>
+                <th style="width:10%;">الخصم<span class="en">Discount</span></th>
+                <th style="width:12%;">الصافي<span class="en">Net excl. VAT</span></th>
+                <th style="width:6%;">الضريبة<span class="en">VAT</span></th>
             </tr>
         </thead>
         <tbody>
-            @foreach($invoice['items'] as $item)
+            @foreach($invoice['items'] as $i => $item)
                 <tr>
+                    <td>{{ $i + 1 }}</td>
                     <td class="desc">
-                        <bdi>{{ $item['description'] ?? '-' }}</bdi>
+                        <span class="en">{{ $item['description_en'] ?? $item['description'] ?? '-' }}</span>
+                        @if(!empty($item['description_ar']))<span class="ar bdi">{{ $item['description_ar'] }}</span>@endif
                     </td>
-                    <td>{{ $item['quantity'] ?? '-' }}</td>
+                    <td>{{ rtrim(rtrim(number_format($item['quantity'] ?? 0, 2), '0'), '.') }}</td>
                     <td>{{ number_format($item['price'] ?? 0, 2) }}</td>
                     <td>{{ number_format($item['value'] ?? 0, 2) }}</td>
-                    <td>{{ number_format($item['value'] ?? 0, 2) }}</td>
+                    <td>{{ number_format($item['discount'] ?? 0, 2) }}</td>
+                    <td>{{ number_format($item['net'] ?? (($item['value'] ?? 0) - ($item['discount'] ?? 0)), 2) }}</td>
+                    <td>{{ $item['vat_code'] ?? 'S' }}</td>
                 </tr>
             @endforeach
         </tbody>
         <tfoot>
             <tr class="items-total-row">
-                <td colspan="4" style="text-align:right;">
-                    الاجمالي الكلي - Total (SAR)
-                </td>
+                <td colspan="2">Total (SAR) · الإجمالي</td>
+                <td>{{ count($invoice['items']) }}</td>
+                <td></td>
+                <td>{{ number_format($invoice['totals']['subtotal'] ?? 0, 2) }}</td>
+                <td>{{ number_format($invoice['totals']['discount'] ?? 0, 2) }}</td>
                 <td>{{ number_format($invoice['totals']['after_discount'] ?? 0, 2) }}</td>
+                <td></td>
             </tr>
         </tfoot>
     </table>
 
-    {{-- ===== TOTALS + QR ===== --}}
-    <table class="totals-wrap">
+    <table class="summary-wrap">
         <tr>
-            <td class="qr-cell">
-                <img src="{{ $qrCode }}" alt="QR Code">
+            <td>
+                <table class="vat-summary">
+                    <caption>ملخص الضريبة المضافة · VAT Summary</caption>
+                    <tr>
+                        <th>رمز<br>Code</th>
+                        <th>قبل الضريبة<br>Ex VAT</th>
+                        <th>مبلغ الضريبة<br>VAT</th>
+                        <th>شامل الضريبة<br>Inc VAT</th>
+                    </tr>
+                    <tr>
+                        <td>S</td>
+                        <td>{{ number_format($invoice['totals']['after_discount'] ?? 0, 2) }}</td>
+                        <td>{{ number_format($invoice['totals']['vat'] ?? 0, 2) }}</td>
+                        <td>{{ number_format(($invoice['totals']['after_discount'] ?? 0) + ($invoice['totals']['vat'] ?? 0), 2) }}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>O</td>
+                        <td>0.00</td>
+                        <td>0.00</td>
+                        <td>0.00</td>
+                    </tr>
+                    <tr class="total-row">
+                        <td>Total</td>
+                        <td>{{ number_format($invoice['totals']['after_discount'] ?? 0, 2) }}</td>
+                        <td>{{ number_format($invoice['totals']['vat'] ?? 0, 2) }}</td>
+                        <td>{{ number_format(($invoice['totals']['after_discount'] ?? 0) + ($invoice['totals']['vat'] ?? 0), 2) }}
+                        </td>
+                    </tr>
+                </table>
             </td>
             <td>
-                <table class="totals-table">
+                <table class="payment-details">
+                    <caption>معلومات الدفع · Payment Details</caption>
                     <tr>
-                        <td class="t-label">{{ $labels['total'] ?? 'الاجمالي' }} - Subtotal</td>
-                        <td class="t-value">{{ number_format($invoice['totals']['subtotal'] ?? 0, 2) }}</td>
+                        <td class="pd-label bdi">{{ $invoice['payment']['mode'] ?? '-' }} · Receipt No.
+                            {{ $invoice['payment']['ref'] ?? '-' }}</td>
+                        <td class="pd-value">{{ number_format($invoice['payment']['value'] ?? 0, 2) }}</td>
+                    </tr>
+                    <tr class="pd-total">
+                        <td class="pd-label">المبلغ المدفوع · Total Paid</td>
+                        <td class="pd-value">{{ number_format($invoice['totals']['amount_paid'] ?? 0, 2) }}</td>
                     </tr>
                     <tr>
-                        <td class="t-label">{{ $labels['discount'] ?? 'الخصم' }} - Discount</td>
-                        <td class="t-value">{{ number_format($invoice['totals']['discount'] ?? 0, 2) }}</td>
+                        <td class="pd-label">الباقي · Change</td>
+                        <td class="pd-value">0.00</td>
                     </tr>
                     <tr>
-                        <td class="t-label">{{ $labels['vat'] ?? 'ضريبة القيمة المضافة' }} - VAT</td>
-                        <td class="t-value">{{ number_format($invoice['totals']['vat'] ?? 0, 2) }}</td>
-                    </tr>
-                    <tr class="grand-total">
-                        <td class="t-label">{{ $labels['amount_paid'] ?? 'المبلغ المدفوع' }} - Total Paid</td>
-                        <td class="t-value">{{ number_format($invoice['totals']['amount_paid'] ?? 0, 2) }}</td>
+                        <td class="pd-label">تعديل الباقي · Change Adjustment</td>
+                        <td class="pd-value">0.00</td>
                     </tr>
                 </table>
             </td>
         </tr>
     </table>
 
-    {{-- ===== PAYMENT DETAILS ===== --}}
-    <table class="payments-table">
-        <thead>
-            <tr>
-                <th style="width:40%;">طريقة الدفع<span class="en">Payment Method</span></th>
-                <th style="width:35%;">المرجع<span class="en">Reference</span></th>
-                <th style="width:25%;">المبلغ<span class="en">Amount</span></th>
-            </tr>
-        </thead>
-        <tbody>
-            @forelse(($invoice['payments'] ?? []) as $p)
-                <tr>
-                    <td><bdi>{{ $p['mode'] ?? '-' }}</bdi></td>
-                    <td><bdi>{{ $p['ref'] ?? '-' }}</bdi></td>
-                    <td>{{ number_format($p['value'] ?? 0, 2) }}</td>
-                </tr>
-            @empty
-                <tr>
-                    <td><bdi>{{ $invoice['payment']['mode'] ?? '-' }}</bdi></td>
-                    <td><bdi>{{ $invoice['payment']['ref'] ?? '-' }}</bdi></td>
-                    <td>{{ number_format($invoice['payment']['value'] ?? 0, 2) }}</td>
-                </tr>
-            @endforelse
-        </tbody>
-    </table>
-
-    {{-- ===== VAT / CR / UNIFIED NUMBER LINE ===== --}}
-    <div class="tax-ids">
-        {{ $labels['tax_no'] ?? 'الرقم الضريبي' }} - VAT ID: <bdi>{{ $invoice['company']['vat_no'] ?? '-' }}</bdi>
-        @if(!empty($invoice['company']['cr_number']))
-            &nbsp;&nbsp;|&nbsp;&nbsp; CR#: <bdi>{{ $invoice['company']['cr_number'] }}</bdi>
-        @endif
-        @if(!empty($invoice['company']['unified_number']))
-            &nbsp;&nbsp;|&nbsp;&nbsp; {{ $labels['unified_no'] ?? 'الرقم الموحد' }}:
-            <bdi>{{ $invoice['company']['unified_number'] }}</bdi>
-        @endif
-    </div>
-
-    {{-- ===== COMPANY LINE ===== --}}
-    <div style="text-align:center; font-size:9px; color:#555; margin-bottom:6px;">
-        <bdi>{{ $invoice['company']['name_ar'] ?? '-' }}</bdi> — <bdi>{{ $invoice['company']['address'] ?? '-' }}</bdi>,
-        <bdi>{{ $invoice['company']['city'] ?? '-' }}</bdi>, <bdi>{{ $invoice['company']['country'] ?? '-' }}</bdi>
-    </div>
-
-    {{-- ===== TERMS ===== --}}
-    {{-- Arabic terms (labels['terms']) are the real, existing legal/business content — 24 actual terms
-    about returns, warranty, and fees, not placeholder text. There is no English translation of them
-    anywhere in the system (confirmed against InvoiceSettingSeeder), and this view does not invent one:
-    the English column reads from a SEPARATE setting key, terms_en, left for an admin to fill in via
-    the existing PUT /api/invoice-settings/{key} endpoint. Until that's set, the Arabic column spans
-    the full width rather than leaving a confusingly empty English column beside it. --}}
-    @if(!empty($labels['terms']) || !empty($labels['terms_en']))
-        <table class="terms-wrap">
-            <tr>
-                <td class="ar-col" style="{{ empty($labels['terms_en']) ? 'width:100%;' : '' }}">
-                    @if(!empty($labels['terms']))
-                        <ul class="terms-list">
-                            @foreach($labels['terms'] as $term)
-                                <li>{{ $term }}</li>
-                            @endforeach
-                        </ul>
-                    @endif
-                </td>
-                @if(!empty($labels['terms_en']))
-                    <td class="en-col">
-                        <ul class="terms-list">
-                            @foreach($labels['terms_en'] as $term)
-                                <li>{{ $term }}</li>
-                            @endforeach
-                        </ul>
-                    </td>
-                @endif
-            </tr>
-        </table>
-    @endif
-
-    {{-- ===== FOOTER ===== --}}
-    <table class="footer-bar">
+    <table class="tax-ids-wrap">
         <tr>
-            <td class="footer-ar">{{ $labels['footer_ar'] ?? 'شكراً لثقتكم بنا.' }}</td>
-            <td class="footer-mid">{{ $labels['footer_site'] ?? 'naqi.sa' }}</td>
-            <td class="footer-en">{{ $labels['footer_en'] ?? 'Thank you for trusting Naqi.' }}</td>
+            <td>
+                <div class="tax-ids-text">
+                    <div><strong>VAT ID: {{ $invoice['company']['vat_no'] ?? '-' }}</strong> · الرقم الضريبي</div>
+                    <div><strong>Unified No.: {{ $invoice['company']['unified_number'] ?? '-' }}</strong> · الرقم الموحد
+                    </div>
+                </div>
+                <div class="tax-legend">"S" VAT inclusive @ 15% شامل ضريبة القيمة المضافة 15% &nbsp;&nbsp; <br> "O" VAT not
+                    applicable غير خاضع لضريبة القيمة المضافة</div>
+            </td>
+            <td class="qr-cell">
+                <img src="{{ $qrCode }}" alt="QR Code">
+            </td>
         </tr>
     </table>
+
+    <table class="company-line">
+        <tr>
+            <td class="cl-en">{{ $invoice['company']['name_en'] ?? '-' }}, {{ $invoice['company']['address'] ?? '-' }},
+                {{ $invoice['company']['city'] ?? '-' }}, {{ $invoice['company']['country'] ?? '-' }}.</td>
+            <td class="cl-mid bdi">Unified Number: {{ $invoice['company']['unified_number'] ?? '-' }} · الرقم الموحد
+            </td>
+            <td class="cl-ar bdi">{{ $invoice['company']['name_ar'] ?? '-' }}،
+                {{ $invoice['company']['address'] ?? '-' }}، {{ $invoice['company']['city'] ?? '-' }}،
+                {{ $invoice['company']['country'] ?? '-' }}</td>
+        </tr>
+    </table>
+
+    <div class="terms-heading bdi">الشروط والأحكام · Terms and Conditions</div>
+    <table class="terms-wrap">
+        <tr>
+            <td class="en-col">
+                <ul class="terms-list en">
+                    @foreach(array_slice($labels['terms_en'] ?? [], 0, 9) as $i => $term)
+                        <li><span class="num">{{ $i + 1 }}.</span> {{ $term }}</li>
+                    @endforeach
+                </ul>
+            </td>
+            <td class="ar-col">
+                <ul class="terms-list ar">
+                    @foreach(array_slice($labels['terms'] ?? [], 0, 9) as $i => $term)
+                        <li class="bdi"><span class="num">-{{ $i + 1 }}</span> {{ $term }}</li>
+                    @endforeach
+                </ul>
+            </td>
+        </tr>
+    </table>
+
+    {{-- This is the page-1 bottom note ("your invoice is your warranty..."), not the page-2 thank-you
+    footer — it reuses .footer-bar's layout but keeps its own single top border only, no bottom
+    border, matching the sample's page 1 (which continues with "Page 1/2" directly below, not a
+    fully-enclosed box the way page 2's footer is). --}}
+    <table class="footer-bar" style="margin-top:14px; border-top:1.5px solid #222; border-bottom:none;">
+        <tr>
+            <td style="text-align:left; font-size:8px; color:#555;">Your invoice is your warranty — please keep it.
+                Terms &amp; conditions on page 2.</td>
+            <td colspan="2" style="text-align:right; font-size:8px; color:#555;">فاتورتك هي ضمانك — يرجى المحافظة عليها.
+                الشروط والأحكام في الصفحة 2.</td>
+        </tr>
+    </table>
+    <div class="page-num">Page 1 / 2</div>
+
+    {{-- ========================= PAGE 2 ========================= --}}
+    <div class="page-break"></div>
+
+    <table class="header2-table">
+        <tr>
+            <td class="header2-logo-cell">
+                <img src="{{ $logoSrc }}" alt="Logo">
+                <div class="logo-company-name">{{ $invoice['company']['name_ar'] ?? '-' }}</div>
+                <div class="logo-company-name-en">{{ $invoice['company']['name_en'] ?? '-' }}</div>
+                <div class="logo-tagline bdi">{{ $invoice['company']['tagline'] ?? '' }}</div>
+            </td>
+            <td class="header2-title-cell">
+                <div class="header2-title bdi">{{ $invoice['number'] ?? '-' }} · فاتورة ضريبية مبسطة</div>
+                <div class="header2-sub">Simplified Tax Invoice · {{ $invoice['date'] ?? '-' }}</div>
+            </td>
+        </tr>
+    </table>
+
+    <div class="terms-heading bdi">الشروط والأحكام (تابع) · Terms and Conditions (continued)</div>
+    <table class="terms-wrap">
+        <tr>
+            <td class="en-col">
+                <ul class="terms-list en">
+                    @foreach(array_slice($labels['terms_en'] ?? [], 9) as $i => $term)
+                        <li><span class="num">{{ $i + 10 }}.</span> {{ $term }}</li>
+                    @endforeach
+                </ul>
+            </td>
+            <td class="ar-col">
+                <ul class="terms-list ar">
+                    @foreach(array_slice($labels['terms'] ?? [], 9) as $i => $term)
+                        <li class="bdi"><span class="num">-{{ $i + 10 }}</span> {{ $term }}</li>
+                    @endforeach
+                </ul>
+            </td>
+        </tr>
+    </table>
+
+    <table class="footer-bar">
+        <tr>
+            <td class="footer-en">Thank you for choosing NAQI</td>
+            <td class="footer-mid">{{ $invoice['company']['email'] ?? 'contact@naqi.sa' }} ·
+                {{ $invoice['company']['unified_number'] ?? '' }}</td>
+            <td class="footer-ar">شكراً لاختياركم نقي</td>
+        </tr>
+    </table>
+    <div class="page-num">Page 2 / 2</div>
 
 </body>
 

@@ -12,6 +12,7 @@ class NearPayWebhook extends Model
 
     protected $fillable = [
         'transaction_id',
+        'customer_reference_number',
         'is_approved',
         'is_refunded',
         'is_reversed',
