@@ -4,6 +4,7 @@ namespace App\Services\WhatsApp;
 
 use App\Services\Telegram\TelegramService;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class WhatsAppConfirmationService
 {
@@ -105,7 +106,13 @@ class WhatsAppConfirmationService
 
         $response = Http::withToken($this->token)
             ->post($this->url, $payload);
-
+        // log the payload for debugging purposes
+        Log::info('WhatsAppConfirmationService: Sending template message', [
+            'to' => $to,
+            'template' => $templateName,
+            'payload' => $payload,
+            'response' => $response,
+        ]);
         return $response;
     }
 }

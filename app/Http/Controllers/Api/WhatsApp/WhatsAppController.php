@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\WhatsApp\SendWhatsAppMessageRequest;
 use App\Jobs\SendPreAppointmentMessageJob;
 use App\Models\OrderLead;
+use App\Models\ShortLink;
 use App\Models\PreAppointmentMessage;
 use App\Models\User;
 use App\Notifications\TechNotification;
@@ -567,10 +568,10 @@ class WhatsAppController extends Controller
             ],
         ];
 
-        Log::channel('whatsapp')->info('📤 Sending request to Dy365', [
-            'appointment_id' => $appointmentId,
-            'request_body'   => $requestBody,
-        ]);
+        // Log::channel('whatsapp')->info('📤 Sending request to Dy365', [
+        //     'appointment_id' => $appointmentId,
+        //     'request_body'   => $requestBody,
+        // ]);
 
         try {
             $response = $this->dyService->sendRequest3(
@@ -1137,6 +1138,29 @@ class WhatsAppController extends Controller
                 'q2_status' => $status,
                 'q2_error'  => $errorMessage,
             ]);
+            return;
+        }
+
+        // The invoice link template message (SendInvoiceLinkJob) — set there right after a successful send,
+        // the same message_id -> delivery_status/delivery_error pattern as pre_appointment_messages above.
+        $shortLink = ShortLink::where('message_id', $messageId)->first();
+
+        if ($shortLink) {
+            $shortLink->update([
+                'delivery_status' => $status,
+                'delivery_error'  => $errorMessage,
+            ]);
+
+            // if ($status === 'failed' && !empty($errorMessage)) {
+            //     TelegramService::send(
+            //         "⚠️ Invoice link WhatsApp message failed\n\n"
+            //             . "book_id: {$shortLink->book_id}\n"
+            //             . "phone: {$shortLink->phone}\n"
+            //             . "message_id: {$messageId}\n"
+            //             . "delivery_error: {$errorMessage}"
+            //     );
+            // }
+
             return;
         }
 

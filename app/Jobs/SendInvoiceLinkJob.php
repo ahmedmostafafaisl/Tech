@@ -141,7 +141,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         }
 
         if (Setting::isActive('invoice_send_whatsapp_active', false)) {
-            $sentViaAny = $this->sendViaWhatsApp($whatsAppService, $whatsAppPlainService, $shortUrl, $evaluationLink, $pdfUrl) || $sentViaAny;
+            $sentViaAny = $this->sendViaWhatsApp($whatsAppService, $whatsAppPlainService, $shortUrl, $evaluationLink, $pdfUrl, $shortLink) || $sentViaAny;
         }
 
         if ($sentViaAny) {
@@ -190,7 +190,7 @@ class SendInvoiceLinkJob implements ShouldQueue
      *          within 24 hours of the customer's last message to the business; outside that window Meta
      *          rejects it, so this path can fail for a reason the template path never would.
      */
-    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, WhatsAppService $whatsAppPlainService, string $shortUrl, string $evaluationLink, string $pdfUrl): bool
+    private function sendViaWhatsApp(WhatsAppConfirmationService $whatsAppService, WhatsAppService $whatsAppPlainService, string $shortUrl, string $evaluationLink, string $pdfUrl, ShortLink $shortLink): bool
     {
         $useTemplate = Setting::isActive('invoice_whatsapp_use_template', true);
 
@@ -201,7 +201,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         $this->logWhatsAppAttempt($useTemplate);
 
         $sent = $useTemplate
-            ? $this->sendViaWhatsAppTemplate($whatsAppService, $shortUrl, $evaluationLink, $pdfUrl)
+            ? $this->sendViaWhatsAppTemplate($whatsAppService, $shortUrl, $evaluationLink, $pdfUrl, $shortLink)
             : $this->sendViaWhatsAppFreeform($whatsAppPlainService, $shortUrl);
 
         TelegramService::send(
@@ -244,7 +244,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         TelegramService::send(implode("\n", $lines));
     }
 
-    private function sendViaWhatsAppTemplate(WhatsAppConfirmationService $whatsAppService, string $shortUrl, string $evaluationLink, string $pdfUrl): bool
+    private function sendViaWhatsAppTemplate(WhatsAppConfirmationService $whatsAppService, string $shortUrl, string $evaluationLink, string $pdfUrl, ShortLink $shortLink): bool
     {
         $templateName = Setting::where('key', 'invoice_whatsapp_template_name')->value('value');
 
@@ -259,16 +259,19 @@ class SendInvoiceLinkJob implements ShouldQueue
             return false;
         }
 
-        // The approved template is bilingual with 4 DISTINCT variables, not 2 reused ones: {{1}}/{{2}} for
-        // the Arabic section, {{3}}/{{4}} for the English section repeating the same two links — deliberate,
-        // so neither language's slot is ever filled by assuming the other's position.
-        //
         // Meta's Cloud API rejects a "parameters" array of raw strings outright ("expected: '[object,
         // null]'") — every parameter must be an object. Every OTHER existing caller of
         // sendTemplateMessage() (WhatsAppController, etc.) already builds this shape themselves; this job
-        // was the first to pass raw strings instead, which is what actually triggered the error — the
+        // was the first to pass raw strings instead, which is what actually triggered that error — the
         // service method itself is a plain pass-through and needed no change.
-        $bodyParameters = collect([$shortUrl, $evaluationLink, $shortUrl, $evaluationLink])
+        //
+        // Exactly 2 body variables — confirmed directly against the approved template's real preview: the
+        // invoice itself is now the attached Document header (below), not a link in the body text at all, so
+        // the body only carries the evaluation link, once for the Arabic half of the bilingual text and once
+        // for the English half. The previous 4-parameter version (invoice link, eval link, invoice link, eval
+        // link) was accepted by Meta's API at send time regardless, but silently failed delivery afterwards —
+        // a parameter-count mismatch against the template's real definition is NOT caught synchronously.
+        $bodyParameters = collect([$evaluationLink, $evaluationLink])
             ->map(fn($value) => ['type' => 'text', 'text' => $value])
             ->all();
 
@@ -312,9 +315,21 @@ class SendInvoiceLinkJob implements ShouldQueue
             ]);
 
             $this->alertTelegram('WhatsApp', 'Not accepted by Meta', ['template' => $templateName, 'response' => $responseForLog]);
+
+            return false;
         }
 
-        return $sent;
+        // Meta accepting the send (what $sent confirms) is NOT the same as the message actually reaching the
+        // phone — this message_id is what lets the async delivery status callback (WhatsAppController::
+        // applyDeliveryStatus(), /WhatsApp/receive) find and update THIS row later with delivery_status/
+        // delivery_error, the same way it already does for pre_appointment_messages and order_leads.
+        $messageId = $response->json('messages.0.id');
+
+        if ($messageId) {
+            $shortLink->update(['message_id' => $messageId]);
+        }
+
+        return true;
     }
 
     private function sendViaWhatsAppFreeform(WhatsAppService $whatsAppPlainService, string $shortUrl): bool

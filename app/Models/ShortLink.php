@@ -9,7 +9,7 @@ class ShortLink extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['code', 'url', 'hits', 'book_id', 'phone', 'sent', 'invoice_generated', 'last_error'];
+    protected $fillable = ['code', 'url', 'hits', 'book_id', 'phone', 'sent', 'invoice_generated', 'last_error', 'message_id', 'delivery_status', 'delivery_error'];
 
     protected $casts = [
         'sent' => 'boolean',
