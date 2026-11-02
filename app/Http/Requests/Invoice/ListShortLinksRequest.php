@@ -20,13 +20,17 @@ class ListShortLinksRequest extends FormRequest
             'sent'              => ['nullable', 'in:0,1,true,false'],
             'invoice_generated' => ['nullable', 'in:0,1,true,false'],
             'last_error'        => ['nullable', 'string'],
+            // WhatsApp's own async statuses (sent/delivered/read/failed), filled in later by
+            // WhatsAppController::applyDeliveryStatus() — exact match, not partial, since these are a fixed
+            // set of known values rather than free text like last_error.
+            'delivery_status'   => ['nullable', 'string', 'in:sent,delivered,read,failed'],
             'code'              => ['nullable', 'string'],
             'hits'              => ['nullable', 'integer', 'min:0'],
             'date_from'         => ['nullable', 'date'],
             'date_to'           => ['nullable', 'date', 'after_or_equal:date_from'],
             'per_page'          => ['nullable', 'integer', 'min:1', 'max:100'],
             'page'              => ['nullable', 'integer', 'min:1'],
-            'sort_by'           => ['nullable', 'string', 'in:created_at,updated_at,hits,sent,invoice_generated,book_id'],
+            'sort_by'           => ['nullable', 'string', 'in:created_at,updated_at,hits,sent,invoice_generated,book_id,delivery_status'],
             'sort_direction'    => ['nullable', 'string', 'in:asc,desc'],
         ];
     }

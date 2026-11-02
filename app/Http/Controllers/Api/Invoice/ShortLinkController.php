@@ -45,6 +45,10 @@ class ShortLinkController extends Controller
             $query->where('last_error', 'like', '%' . $validated['last_error'] . '%');
         }
 
+        if (!empty($validated['delivery_status'])) {
+            $query->where('delivery_status', $validated['delivery_status']);
+        }
+
         if (!empty($validated['code'])) {
             $query->where('code', $validated['code']);
         }

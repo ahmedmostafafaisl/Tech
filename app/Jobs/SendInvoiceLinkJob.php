@@ -183,8 +183,10 @@ class SendInvoiceLinkJob implements ShouldQueue
      * Which WhatsApp path to use is controlled by invoice_whatsapp_use_template (default: ON — this is the
      * approved, Meta-compliant path, so a missing setting row must never silently fall back to the other
      * one):
-     *   - ON:  the approved template (invoice_whatsapp_template_name), 4 variables, includes the
-     *          evaluation link — works outside the 24-hour customer-service window, since it's pre-approved.
+     *   - ON:  the approved template (invoice_whatsapp_template_name) — the invoice PDF itself as the
+     *          template's Document header, plus 2 body variables (the evaluation link, once for each half
+     *          of the bilingual body text) — works outside the 24-hour customer-service window, since it's
+     *          pre-approved.
      *   - OFF: a plain freeform text message (no template at all) — the older message wording, invoice
      *          link only, no evaluation link. WhatsApp Business API restricts freeform/session messages to
      *          within 24 hours of the customer's last message to the business; outside that window Meta
@@ -204,12 +206,12 @@ class SendInvoiceLinkJob implements ShouldQueue
             ? $this->sendViaWhatsAppTemplate($whatsAppService, $shortUrl, $evaluationLink, $pdfUrl, $shortLink)
             : $this->sendViaWhatsAppFreeform($whatsAppPlainService, $shortUrl);
 
-        TelegramService::send(
-            "📤 Invoice WhatsApp send " . ($sent ? 'succeeded' : 'failed') . "\n\n"
-                . "book_id: {$this->bookId}\n"
-                . "phone: {$this->phone}\n"
-                . "path: " . ($useTemplate ? 'template' : 'freeform')
-        );
+        // TelegramService::send(
+        //     "📤 Invoice WhatsApp send " . ($sent ? 'succeeded' : 'failed') . "\n\n"
+        //         . "book_id: {$this->bookId}\n"
+        //         . "phone: {$this->phone}\n"
+        //         . "path: " . ($useTemplate ? 'template' : 'freeform')
+        // );
 
         return $sent;
     }
@@ -389,7 +391,7 @@ class SendInvoiceLinkJob implements ShouldQueue
             $lines[] = "{$key}: " . (is_scalar($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE));
         }
 
-        TelegramService::send(implode("\n", $lines));
+        // TelegramService::send(implode("\n", $lines));
     }
 
     private function generateUniqueCode(): string

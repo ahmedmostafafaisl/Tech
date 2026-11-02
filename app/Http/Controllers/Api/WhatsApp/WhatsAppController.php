@@ -1164,6 +1164,31 @@ class WhatsAppController extends Controller
             return;
         }
 
+        // The NEW, independent invoice-via-WhatsApp cycle (SendInvoiceWhatsAppMessageJob /
+        // InvoiceWhatsAppSenderService) — a separate table from short_links above, but the same webhook: this
+        // is shared, unchanged infrastructure, not something either cycle owns. One more lookup added to the
+        // existing chain, nothing about the chain itself restructured.
+        $invoiceWhatsAppMessage = \App\Models\InvoiceWhatsAppMessage::where('message_id', $messageId)->first();
+
+        if ($invoiceWhatsAppMessage) {
+            $invoiceWhatsAppMessage->update([
+                'delivery_status' => $status,
+                'delivery_error'  => $errorMessage,
+            ]);
+
+            // if ($status === 'failed' && !empty($errorMessage)) {
+            //     TelegramService::send(
+            //         "⚠️ New-cycle invoice WhatsApp message failed\n\n"
+            //             . "book_id: {$invoiceWhatsAppMessage->book_id}\n"
+            //             . "phone: {$invoiceWhatsAppMessage->phone}\n"
+            //             . "message_id: {$messageId}\n"
+            //             . "delivery_error: {$errorMessage}"
+            //     );
+            // }
+
+            return;
+        }
+
         Log::channel('whatsapp')->warning('📬 Delivery status for unknown message_id', [
             'message_id' => $messageId,
             'status'     => $status,

@@ -1006,6 +1006,14 @@ Route::get('/invoice/{id}/download', [Invoice2Controller::class, 'download'])
 Route::post('/invoice/send-link', [InvoiceController::class, 'sendInvoiceLink'])
     ->name('invoice.send-link');
 
+// The new, independent invoice-via-WhatsApp cycle — a deliberately separate route from the one above, which
+// is untouched. Gated by its own setting (new_invoice_whatsapp_active); see InvoiceWhatsAppController.
+Route::post('/invoice-whatsapp/send', [\App\Http\Controllers\Api\InvoiceWhatsApp\InvoiceWhatsAppController::class, 'send'])
+    ->name('invoice-whatsapp.send');
+
+Route::middleware('auth:sanctum')->get('/invoice-whatsapp', [\App\Http\Controllers\Api\InvoiceWhatsApp\InvoiceWhatsAppController::class, 'index'])
+    ->name('invoice-whatsapp.index');
+
 Route::get('invoice/debug/{id}', [App\Http\Controllers\Api\Pdf\InvoiceController::class, 'debug']);
 Route::get('invoice/debug-chrome', [Invoice2Controller::class, 'debugChrome']);
 
