@@ -35,6 +35,15 @@ class InvoiceWhatsAppSenderService
             return ['success' => false, 'error' => 'invoice_whatsapp_template_name setting is not configured'];
         }
 
+        // A real, Meta-approved template name is never "true"/"false"/"1"/"0" — seen in production as the
+        // literal value Meta rejected with "(#132001) Template name does not exist", which happens when this
+        // setting's row gets overwritten with a boolean-looking value (e.g. a toggle setting accidentally
+        // updated instead of this one). Catching it here fails fast with an actionable message, instead of
+        // reaching Meta first and coming back with a cryptic OAuth error that doesn't name the real cause.
+        if (in_array(strtolower((string) $templateName), ['true', 'false', '1', '0'], true)) {
+            return ['success' => false, 'error' => "invoice_whatsapp_template_name is misconfigured — its value is \"{$templateName}\", not a real template name"];
+        }
+
         $pdfUrl = url('/api/invoice/' . $bookId . '/download');
 
         $orderType = DirectAppointment::where('book_id', $bookId)->latest('id')->value('order_type');
