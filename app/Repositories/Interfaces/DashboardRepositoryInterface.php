@@ -9,6 +9,7 @@ use App\Models\PreAppointmentMessage;
 interface DashboardRepositoryInterface
 {
     public function getAllTechnicians(Request $request): array;
+    public function getAllDepartments(): array;
     public function getSingleTechnician(int $id);
     public function getDirectAppointments(Request $request): array;
     public function getSingleDirectAppointment(int $id);

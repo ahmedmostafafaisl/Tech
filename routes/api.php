@@ -819,6 +819,7 @@ Route::get('power-bi-messages', [DashboardController::class, 'getAllPreMessagesP
 // Dashboard routes
 Route::middleware('auth:sanctum')->prefix('dashboard')->group(function () {
     Route::get('/techs', [DashboardController::class, 'getAllTechnicians']);
+    Route::get('/departments', [DashboardController::class, 'getAllDepartments']);
     Route::get('/tech/{id}', [DashboardController::class, 'getSingleTechnician']);
     Route::get('/direct-appointment/{id}', [DashboardController::class, 'getSingleDirectAppointment']);
     Route::get('/direct-appointments', [DashboardController::class, 'getDirectAppointments']);

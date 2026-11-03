@@ -214,7 +214,7 @@ class UserRepository implements UserRepositoryInterface
 
         if (isset($data['image'])) {
             $image = $data['image'];
-            $fileName = uniqid().'.'.$image->getClientOriginalExtension();
+            $fileName = uniqid() . '.' . $image->getClientOriginalExtension();
             $path = 'User/images';
             $data['image'] = $image->storeAs($path, $fileName, 's3');
         }
@@ -273,7 +273,7 @@ class UserRepository implements UserRepositoryInterface
 
         if (isset($data['image'])) {
             $image = $data['image'];
-            $fileName = uniqid().'.'.$image->getClientOriginalExtension();
+            $fileName = uniqid() . '.' . $image->getClientOriginalExtension();
             $rut = 'User/images';
             $image_path = $image->storeAs($rut, $fileName, 's3');
             $data['image'] = $image_path;
@@ -507,7 +507,7 @@ class UserRepository implements UserRepositoryInterface
         }
         if (isset($data['image'])) {
             $image = $data['image'];
-            $fileName = uniqid().'.'.$image->getClientOriginalExtension();
+            $fileName = uniqid() . '.' . $image->getClientOriginalExtension();
             $rut = 'User/images';
             $image_path = $image->storeAs($rut, $fileName, 'public');
             $data['image'] = $image_path;
@@ -541,7 +541,21 @@ class UserRepository implements UserRepositoryInterface
     {
         $authUser = Auth::user();
 
-        if (! $authUser->hasAnyPermission(['update employees', 'update technicians', 'update customers'])) {
+        // A supervisor updates status without needing the generic "update technicians" permission — but only
+        // for a technician in their own department; this is deliberately a separate, more restrictive path,
+        // not a case where hasRole('supervisor') simply grants the permission below outright.
+        if ($authUser->hasRole('supervisor')) {
+            $sameDepartmentTech = $user->type === 'tech'
+                && !empty($authUser->department)
+                && $user->department === $authUser->department;
+
+            if (! $sameDepartmentTech) {
+                return $this->setCode(code: 401)
+                    ->setData([])
+                    ->setMessage('You are not authorized to Update this User.')
+                    ->send();
+            }
+        } elseif (! $authUser->hasAnyPermission(['update employees', 'update technicians', 'update customers'])) {
             return $this->setCode(code: 401)
                 ->setData([])
                 ->setMessage('You are not authorized to Update this User.')

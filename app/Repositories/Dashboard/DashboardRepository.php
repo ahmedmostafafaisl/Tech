@@ -54,6 +54,22 @@ class DashboardRepository implements DashboardRepositoryInterface
         return User::where('type', 'tech')->find($id);
     }
 
+    /**
+     * Every distinct, non-empty department currently in use on the users table — not a fixed list (DY365's
+     * own values, e.g. "Sales", "After sales", "Product", are synced in freely, and a department can also be
+     * typed directly when creating/editing a user from the dashboard), sorted for a stable, predictable order.
+     */
+    public function getAllDepartments(): array
+    {
+        return User::whereNotNull('department')
+            ->where('department', '!=', '')
+            ->distinct()
+            ->orderBy('department')
+            ->pluck('department')
+            ->values()
+            ->all();
+    }
+
     public function getDirectAppointments(Request $request): array
     {
         $query = DirectAppointment::with('technician');

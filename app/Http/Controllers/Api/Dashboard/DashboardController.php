@@ -42,6 +42,15 @@ class DashboardController extends Controller
         ]);
     }
 
+    public function getAllDepartments()
+    {
+        return response()->json([
+            'status'  => 200,
+            'data'    => $this->dashboardRepo->getAllDepartments(),
+            'message' => 'success',
+        ]);
+    }
+
     public function getSingleTechnician($id)
     {
         $technician = $this->dashboardRepo->getSingleTechnician($id);
