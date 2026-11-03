@@ -25,6 +25,7 @@ class StoreUserRequest extends FormRequest
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
             'role'     => 'sometimes|exists:roles,name',
             'type' => 'nullable|in:employee,tech',
+            'department' => 'nullable|string',
         ];
     }
 }

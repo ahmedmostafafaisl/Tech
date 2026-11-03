@@ -355,11 +355,17 @@ Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('dy365/sync-t
 // directly by the mobile app. Deliberately a SEPARATE group from the one below: that one also carries
 // addSalesLine/updateSalesLine/deleteSalesLine, which technicians DO call directly (authorized per-request
 // via authorizeTechOrFail, not by role) — those must keep plain auth:sanctum, not be swept into this.
+// /technicians carries its own role list (adds supervisor) — kept OUT of the super_admin|admin-only group
+// below deliberately: supervisor must reach only this endpoint and dashboard/techs, not every other dy365
+// admin route (warehouses, customers, sync jobs, etc.) that group also covers.
+Route::middleware(['auth:sanctum', 'role:super_admin|admin|supervisor'])->prefix('dy365')->group(function () {
+    Route::get('/technicians', [DyController::class, 'getTechnicians']);
+});
+
 Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('dy365')->group(function () {
     Route::get('/warehouses', [DyController::class, 'getWarehouses']);
     Route::get('/product-categories', [DyController::class, 'getProductCategories']);
     Route::get('/payment-methods', [DyController::class, 'getPaymentMethods']);
-    Route::get('/technicians', [DyController::class, 'getTechnicians']);
     Route::get('/customers', [DyController::class, 'getCustomers']);
     Route::get('/tech/stock', [DyController::class, 'getTechnicianStock']);
     Route::get('/tech/transfers', [DyController::class, 'getTechnicianTransfers']);

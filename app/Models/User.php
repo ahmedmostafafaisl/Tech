@@ -33,6 +33,7 @@ class User extends Authenticatable
         'account_number',
         'address',
         'main_warehouse_id',
+        'department',
     ];
 
 

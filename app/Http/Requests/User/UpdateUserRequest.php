@@ -31,6 +31,7 @@ class UpdateUserRequest extends FormRequest
             'tech_id' => 'sometimes',
             'technician_rec_id' => 'sometimes',
             'warehouse_id' => 'sometimes|string',
+            'department' => 'nullable|string',
 
         ];
     }

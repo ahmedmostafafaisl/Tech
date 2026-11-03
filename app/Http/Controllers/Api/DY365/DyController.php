@@ -103,7 +103,22 @@ class DyController extends Controller
         $response = $this->dy_service->getTechnicians();
 
         if (isset($response['data']['Data']['Technicians']) && is_array($response['data']['Data']['Technicians'])) {
-            return $response['data']['Data']['Technicians'];
+            $technicians = $response['data']['Data']['Technicians'];
+
+            // Same rule as DashboardRepository::getAllTechnicians() — a supervisor with a department set
+            // sees only that department; this is the live DY365 response, not the local users table, so the
+            // filter compares against DY365's own TechnicianDepartment field directly, by this endpoint's
+            // own copy of the rule rather than sharing code with the local-table version.
+            $authUser = auth()->user();
+
+            if ($authUser && $authUser->hasRole('supervisor') && !empty($authUser->department)) {
+                $technicians = array_values(array_filter(
+                    $technicians,
+                    fn($tech) => ($tech['TechnicianDepartment'] ?? null) === $authUser->department
+                ));
+            }
+
+            return $technicians;
         }
 
         return response()->json(['message' => 'No Technicians found.'], 404);

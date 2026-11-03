@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Repositories\Interfaces\DashboardRepositoryInterface;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class DashboardRepository implements DashboardRepositoryInterface
@@ -19,6 +20,15 @@ class DashboardRepository implements DashboardRepositoryInterface
     public function getAllTechnicians(Request $request): array
     {
         $query = User::where('type', 'tech');
+
+        // A supervisor with a department set sees only their own department's techs; everyone else (no
+        // "supervisor" role, or a supervisor with no department assigned) sees the full, unfiltered list —
+        // an unassigned supervisor is treated as not yet scoped, not as "sees nothing".
+        $authUser = Auth::user();
+
+        if ($authUser && $authUser->hasRole('supervisor') && !empty($authUser->department)) {
+            $query->where('department', $authUser->department);
+        }
 
         // ✅ filter by status
         if ($request->filled('status')) {

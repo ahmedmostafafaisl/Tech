@@ -23,25 +23,7 @@ class TechRepository implements TechRepositoryInterface
         $today = Carbon::today();
         $yesterday = Carbon::yesterday();
 
-        // $yesterdayCollectSum = $user->technicianAppointments()
-        //     ->whereDate('appointment_date', $yesterday)
-        //     ->with(['lines' => function ($query) {
-        //         $query->where('payment_method', 'CASH')
-        //             ->where('is_paid', 1);
-        //     }])
-        //     ->get()
-        //     ->flatMap->lines
-        //     ->sum('total_amount');
 
-        // $todayCollectSum = $user->technicianAppointments()
-        //     ->whereDate('appointment_date', $today)
-        //     ->with(['lines' => function ($query) {
-        //         $query->where('payment_method', 'CASH')
-        //             ->where('is_paid', 1);
-        //     }])
-        //     ->get()
-        //     ->flatMap->lines
-        //     ->sum('total_amount');
         $yesterdayCollectSum = $user->technicianAppointments()
             ->whereDate('appointment_date', $yesterday)
             ->with(['payments' => function ($query) {
@@ -739,6 +721,7 @@ class TechRepository implements TechRepositoryInterface
                         'image'            => $tech['Image'],
                         'password'         => bcrypt($tech['Password']),
                         'status'           => $tech['Status'],
+                        'department'       => $tech['TechnicianDepartment'] ?? null,
                     ]
                 );
                 // $user->update(['username' => $tech['Username']] ?? $user->username ?? null);
