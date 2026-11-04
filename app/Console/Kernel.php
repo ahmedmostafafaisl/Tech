@@ -31,9 +31,17 @@ class Kernel extends ConsoleKernel
         // $schedule->command('appointments:send-non-completed-reminders')->everyThreeHours();
         // $schedule->command('reports:send-daily-confirmed-export-links')->timezone('Asia/Riyadh')->dailyAt('09:00')->unlessEmergency();
 
-        $schedule->job(new \App\Jobs\GenerateMonthlyPreMessagesExportLink())->timezone('Asia/Riyadh')->dailyAt('04:00')->unlessEmergency();
+        // ->unlessEmergency() removed: that method does not exist anywhere in this codebase or its
+        // dependencies (confirmed — no Schedule/Event macro registers it) — calling it here threw
+        // BadMethodCallException every time the scheduler tried to build its schedule (confirmed directly
+        // via `php artisan schedule:list`), which aborts the ENTIRE schedule() method, not just this one
+        // line: every scheduled task in this file, including invoices:retry-pending-links below and the new
+        // invoice-whatsapp:retry-failed-messages, has been silently unable to run at all as a result.
+        $schedule->job(new \App\Jobs\GenerateMonthlyPreMessagesExportLink())->timezone('Asia/Riyadh')->dailyAt('04:00');
 
         $schedule->command('invoices:retry-pending-links')->timezone('Asia/Riyadh')->dailyAt('05:00')->withoutOverlapping();
+
+        $schedule->command('invoice-whatsapp:retry-failed-messages')->timezone('Asia/Riyadh')->dailyAt('01:00')->withoutOverlapping();
     }
 
     /**
@@ -86,5 +94,6 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\SendDailyConfirmedExportLinks::class,
         \App\Console\Commands\BackfillTransmittedSerialsCommand::class,
         \App\Console\Commands\RetryPendingInvoiceLinksCommand::class,
+        \App\Console\Commands\RetryFailedInvoiceWhatsAppMessagesCommand::class,
     ];
 }

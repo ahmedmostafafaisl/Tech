@@ -22,6 +22,11 @@ use Illuminate\Support\Facades\Log;
  *
  * DY365 is still checked before sending (via the same shared DyService every invoice flow uses) — there is
  * no point handing Meta a Document header pointing at a PDF that doesn't exist yet.
+ *
+ * $existingMessageId lets a retry (RetryFailedInvoiceWhatsAppMessagesCommand) reuse this exact send logic
+ * against an already-existing row instead of creating a new one each time it runs — same code path as the
+ * original attempt, nothing to keep in sync separately, mirroring how RetryPendingInvoiceLinksCommand
+ * re-dispatches SendInvoiceLinkJob for the existing cycle.
  */
 class SendInvoiceWhatsAppMessageJob implements ShouldQueue
 {
@@ -30,15 +35,21 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
     public function __construct(
         private readonly string $bookId,
         private readonly string $phone,
+        private readonly ?int $existingMessageId = null,
     ) {}
 
     public function handle(DyService $dyService, InvoiceWhatsAppSenderService $sender): void
     {
-        $message = InvoiceWhatsAppMessage::create([
-            'book_id' => $this->bookId,
-            'phone'   => $this->phone,
-            'status'  => 'pending',
-        ]);
+        if ($this->existingMessageId) {
+            $message = InvoiceWhatsAppMessage::findOrFail($this->existingMessageId);
+            $message->update(['status' => 'pending', 'error' => null]);
+        } else {
+            $message = InvoiceWhatsAppMessage::create([
+                'book_id' => $this->bookId,
+                'phone'   => $this->phone,
+                'status'  => 'pending',
+            ]);
+        }
 
         try {
             $response = $dyService->getOrCreateInvoiceByBookId(['bookId' => $this->bookId]);
@@ -95,11 +106,11 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
             'response' => json_encode($result['response'] ?? null),
         ]);
 
-        TelegramService::send(
-            "⚠️ New-cycle invoice WhatsApp send failed\n\n"
-                . "book_id: {$this->bookId}\n"
-                . "phone: {$this->phone}\n"
-                . "error: " . ($result['error'] ?? 'Unknown error')
-        );
+        // TelegramService::send(
+        //     "⚠️ New-cycle invoice WhatsApp send failed\n\n"
+        //         . "book_id: {$this->bookId}\n"
+        //         . "phone: {$this->phone}\n"
+        //         . "error: " . ($result['error'] ?? 'Unknown error')
+        // );
     }
 }

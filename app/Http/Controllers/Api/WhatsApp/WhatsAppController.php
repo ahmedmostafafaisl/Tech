@@ -1107,16 +1107,16 @@ class WhatsAppController extends Controller
             // failures, like the "Business eligibility payment issue" (code 131042) that prompted this: an
             // account-level WhatsApp Business issue that silently fails EVERY subsequent message until
             // resolved, so catching it immediately (rather than finding it later in the database) matters.
-            if ($status === 'failed' && !empty($errorMessage)) {
-                TelegramService::send(
-                    "⚠️ Pre-appointment WhatsApp message failed\n\n"
-                        . "book_id: {$preAppointmentMessage->book_id}\n"
-                        . "phone: {$preAppointmentMessage->phone}\n"
-                        . "name: {$preAppointmentMessage->name}\n"
-                        . "message_id: {$messageId}\n"
-                        . "delivery_error: {$errorMessage}"
-                );
-            }
+            // if ($status === 'failed' && !empty($errorMessage)) {
+            //     TelegramService::send(
+            //         "⚠️ Pre-appointment WhatsApp message failed\n\n"
+            //             . "book_id: {$preAppointmentMessage->book_id}\n"
+            //             . "phone: {$preAppointmentMessage->phone}\n"
+            //             . "name: {$preAppointmentMessage->name}\n"
+            //             . "message_id: {$messageId}\n"
+            //             . "delivery_error: {$errorMessage}"
+            //     );
+            // }
 
             return;
         }
