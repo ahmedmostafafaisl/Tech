@@ -770,6 +770,8 @@ Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->prefix('nearpay/t
     Route::post('/sync', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'sync']);
     Route::post('/{terminal}/assign', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'assign']);
     Route::post('/{terminal}/unassign', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'unassign']);
+    Route::post('/{terminal}/set-default', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'setDefault']);
+    Route::post('/{terminal}/unset-default', [\App\Http\Controllers\Api\NearPay\NearPayTerminalController::class, 'unsetDefault']);
 });
 
 Route::middleware(['auth:sanctum', 'role:super_admin|admin'])->get('/nearpay/technicians/unassigned', [

@@ -179,6 +179,43 @@ class NearPayTerminalController extends Controller
     }
 
     /**
+     * The one shared fallback terminal a tech with none of their own is handed, when
+     * default_terminal_active is on (see UserResource). Clears any previously-default terminal first, so
+     * exactly one is ever default at a time — not restricted to an unassigned terminal, since an admin may
+     * reasonably want the default to also be someone's own assigned terminal.
+     */
+    public function setDefault(NearPayTerminal $terminal)
+    {
+        NearPayTerminal::where('is_default', true)->update(['is_default' => false]);
+
+        $terminal->update(['is_default' => true]);
+
+        return response()->json([
+            'status'  => true,
+            'message' => 'Terminal set as default.',
+            'data'    => $terminal->fresh(),
+        ]);
+    }
+
+    public function unsetDefault(NearPayTerminal $terminal)
+    {
+        if (! $terminal->is_default) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'This terminal is not currently the default.',
+            ], 422);
+        }
+
+        $terminal->update(['is_default' => false]);
+
+        return response()->json([
+            'status'  => true,
+            'message' => 'Terminal is no longer the default.',
+            'data'    => $terminal->fresh(),
+        ]);
+    }
+
+    /**
      * Technicians (type = 'tech') with no row in nearpay_terminals at all — not "assigned_user_id is
      * null for them", since that's every tech by default; this is specifically "has no terminal relationship
      * whatsoever", via whereDoesntHave against the same hasOne used for UserResource's own terminal field.

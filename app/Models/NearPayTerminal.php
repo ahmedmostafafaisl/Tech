@@ -24,12 +24,14 @@ class NearPayTerminal extends Model
         'last_synced_at',
         'assigned_user_id',
         'assigned_at',
+        'is_default',
     ];
 
     protected $casts = [
         'assigned_at'    => 'datetime',
         'last_synced_at' => 'datetime',
         'is_connected'   => 'boolean',
+        'is_default'     => 'boolean',
     ];
 
     public function assignedUser()
