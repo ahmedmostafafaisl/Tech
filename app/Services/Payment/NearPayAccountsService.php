@@ -111,7 +111,7 @@ class NearPayAccountsService
         try {
             $response = $this->client()->post("terminals/{$nearpayTerminalId}/assign", [
                 'name'   => $name,
-                'email'  => $email,
+                'email'  => $this->resolveEmail($email, $name),
                 'mobile' => $this->toInternationalSaudiMobile($mobile),
             ]);
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
@@ -123,6 +123,19 @@ class NearPayAccountsService
         }
 
         return (array) $response->json('terminal');
+    }
+
+    /**
+     * NearPay rejects the assign call outright when email is empty ("email should not be empty", "email
+     * must be an email") — confirmed directly from a failed assign call in production, for a tech with no
+     * email on file at all. $name here is the same value the caller passes as the tech's username (see the
+     * caller in NearPayTerminalController::assign()), so this falls back to "{username}@naqi.sa" rather than
+     * failing the whole assignment over a field NearPay requires but this app doesn't actually need the tech
+     * to have — username's own casing is kept as-is, not altered.
+     */
+    private function resolveEmail(string $email, string $name): string
+    {
+        return trim($email) !== '' ? $email : "{$name}@naqi.sa";
     }
 
     /**

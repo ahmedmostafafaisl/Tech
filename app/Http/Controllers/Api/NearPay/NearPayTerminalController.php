@@ -8,6 +8,7 @@ use App\Http\Requests\NearPay\CreateNearPayTerminalRequest;
 use App\Models\NearPayTerminal;
 use App\Models\User;
 use App\Services\Payment\NearPayAccountsService;
+use App\Services\Telegram\TelegramService;
 
 /**
  * Full cycle for NearPay terminal management, backed by NearPay's own Accounts API — create, assign, and
@@ -105,6 +106,19 @@ class NearPayTerminalController extends Controller
         try {
             $nearPay->assignTerminal($terminal->terminal_id, (string) $user->username, (string) $user->email, (string) $user->phone);
         } catch (\Throwable $e) {
+            // Reported here specifically because a failure at this exact point has shown up in production as
+            // a Cloudflare 502 (the origin never completing a response at all) rather than this clean,
+            // caught JSON reply — meaning the caller sometimes never sees this message or this alert either,
+            // if the process dies before reaching this line. When it DOES get this far, this is still worth
+            // surfacing: a genuine NearPay-side rejection (bad credentials, terminal state conflict, etc.)
+            // is otherwise only visible in whatever the caller's client happened to log.
+            TelegramService::send(
+                "⚠️ NearPay terminal assign failed\n\n"
+                    . "terminal_id: {$terminal->terminal_id}\n"
+                    . "user_id: {$user->id}\n"
+                    . "error: {$e->getMessage()}"
+            );
+
             return response()->json([
                 'status'  => false,
                 'message' => 'Could not assign the terminal with NearPay: ' . $e->getMessage(),
@@ -135,6 +149,13 @@ class NearPayTerminalController extends Controller
         try {
             $nearPay->unassignTerminal($terminal->terminal_id);
         } catch (\Throwable $e) {
+            TelegramService::send(
+                "⚠️ NearPay terminal unassign failed\n\n"
+                    . "terminal_id: {$terminal->terminal_id}\n"
+                    . "assigned_user_id: {$terminal->assigned_user_id}\n"
+                    . "error: {$e->getMessage()}"
+            );
+
             return response()->json([
                 'status'  => false,
                 'message' => 'Could not unassign the terminal with NearPay: ' . $e->getMessage(),
