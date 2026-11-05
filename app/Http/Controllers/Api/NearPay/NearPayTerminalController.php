@@ -8,7 +8,6 @@ use App\Http\Requests\NearPay\CreateNearPayTerminalRequest;
 use App\Models\NearPayTerminal;
 use App\Models\User;
 use App\Services\Payment\NearPayAccountsService;
-use App\Services\Payment\NearPayTerminalSyncService;
 
 /**
  * Full cycle for NearPay terminal management, backed by NearPay's own Accounts API — create, assign, and
@@ -159,23 +158,22 @@ class NearPayTerminalController extends Controller
      * terminals/assignments made directly through NearPay's own dashboard, not only through this app. See
      * NearPayTerminalSyncService's own docblock for exactly how a remote assignment gets linked (or not) to
      * a local user.
+     *
+     * Runs as a background job (SyncNearPayTerminalsJob), not inline — NearPay's own terminal list is
+     * paginated, and paging through every page within the request/response cycle was timing out the web
+     * server with enough terminals (a Cloudflare 502 in production, confirmed to be PHP-FPM being killed
+     * mid-response, not a NearPay or application error). This endpoint now just confirms the sync was
+     * queued; its actual result (synced/linked counts, or a failure) is reported via Telegram once the job
+     * finishes, and the terminals list itself (GET /nearpay/terminals) reflects the new data once it's done.
      */
-    public function sync(NearPayTerminalSyncService $sync)
+    public function sync()
     {
-        try {
-            $result = $sync->syncAll();
-        } catch (\Throwable $e) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Could not sync terminals with NearPay: ' . $e->getMessage(),
-            ], 502);
-        }
+        \App\Jobs\SyncNearPayTerminalsJob::dispatch();
 
         return response()->json([
             'status'  => true,
-            'message' => "Synced {$result['synced']} terminal(s), {$result['linked']} linked to a local user.",
-            'data'    => NearPayTerminal::with('assignedUser:id,username,tech_id,phone')->latest()->get(),
-        ]);
+            'message' => 'Terminal sync started in the background — check Telegram or GET /nearpay/terminals shortly for the result.',
+        ], 202);
     }
 
     /**

@@ -10,13 +10,17 @@ use App\Models\PreAppointmentMessage;
 use App\Models\TechnicianLog;
 use App\Models\User;
 use App\Repositories\Interfaces\DashboardRepositoryInterface;
+use App\Services\DY365\DyService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class DashboardRepository implements DashboardRepositoryInterface
 {
+    public function __construct(protected DyService $dyService) {}
+
     public function getAllTechnicians(Request $request): array
     {
         $query = User::where('type', 'tech');
@@ -162,7 +166,37 @@ class DashboardRepository implements DashboardRepositoryInterface
 
         $appointment->setRelation('lines', $transaction?->lines ?? collect());
 
+        // Live DY365 state for this same appointment, by its book_id — additive, not a replacement for the
+        // local record above (technician/payments/attachments/lines all still come from here). DY365 being
+        // slow or down shouldn't break viewing an appointment's local details, so a failed or empty call
+        // degrades to null rather than failing the whole request.
+        $appointment->setAttribute('dy_appointment', $this->fetchDyAppointment($appointment->book_id));
+
         return $appointment;
+    }
+
+    private function fetchDyAppointment(?string $bookId): ?array
+    {
+        if (empty($bookId)) {
+            return null;
+        }
+
+        try {
+            $response = $this->dyService->getAppointmentByBookIdNew($bookId, 0);
+        } catch (\Throwable $e) {
+            Log::warning('DashboardRepository: failed to fetch DY365 appointment for dashboard view', [
+                'book_id' => $bookId,
+                'error'   => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (!is_array($response) || empty($response['Status'])) {
+            return null;
+        }
+
+        return $response['Data'] ?? null;
     }
 
     public function getTechnicianLogs(Request $request, int $techId): array

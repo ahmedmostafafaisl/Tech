@@ -14,6 +14,7 @@ use App\Http\Resources\Transfer\TransferOrderResource;
 use App\Models\User;
 use App\Repositories\Interfaces\TransferOrderInterface;
 use App\Services\DY365\DyService;
+use App\Services\TransferOrder\TransferOrderCooldown;
 use App\Services\TransferOrder\TransferOrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -24,14 +25,16 @@ class TransferOrderController extends Controller
     protected $transferOrderRepo;
     protected DyService $dyService;
     protected  $service;
+    protected TransferOrderCooldown $cooldown;
 
 
 
-    public function __construct(DyService $dynamicsService, TransferOrderInterface $transferOrderRepo, TransferOrderService $service)
+    public function __construct(DyService $dynamicsService, TransferOrderInterface $transferOrderRepo, TransferOrderService $service, TransferOrderCooldown $cooldown)
     {
         $this->transferOrderRepo = $transferOrderRepo;
         $this->dyService = $dynamicsService;
         $this->service = $service;
+        $this->cooldown = $cooldown;
     }
 
     public function index(Request $request)
@@ -248,6 +251,14 @@ class TransferOrderController extends Controller
 
 
         $response = $this->service->getTechnicianTransfersWithLocalStatus($tech_id, $request->input('currentPage', 1), $request->input('pageSize', 30), $request->input('searchTerm', ''));
+
+        // Seconds left before this tech can create another transfer order — null means they're free to now
+        // (no cooldown configured, no prior transfer order, or it already elapsed). Added here, not just
+        // returned at creation time, so the client can poll this same endpoint to know when to re-enable
+        // the "create" action without needing to remember when the last attempt happened.
+        if (is_array($response)) {
+            $response['transfer_order_timer_remaining_seconds'] = $this->cooldown->remainingSeconds((string) $tech_id);
+        }
 
         return $this->setCode(200)
             ->setData($response)

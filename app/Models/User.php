@@ -34,6 +34,7 @@ class User extends Authenticatable
         'address',
         'main_warehouse_id',
         'department',
+        'last_transfer_order_at',
     ];
 
 
@@ -49,8 +50,9 @@ class User extends Authenticatable
     ];
 
     protected $casts = [
-        'otp_expires_at'     => 'datetime',
-        'otp_verified_until' => 'datetime',
+        'otp_expires_at'          => 'datetime',
+        'otp_verified_until'      => 'datetime',
+        'last_transfer_order_at'  => 'datetime',
     ];
 
     public function customerAppointments()

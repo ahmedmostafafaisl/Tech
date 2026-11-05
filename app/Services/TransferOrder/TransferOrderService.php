@@ -3,9 +3,11 @@
 
 namespace App\Services\TransferOrder;
 
+use App\Exceptions\Transfer\TransferOrderCooldownException;
 use App\Exceptions\Transfer\TransferValidationException;
 use App\Http\Resources\Transfer\NewTransferOrderResource;
 use App\Logging\TelegramLogger;
+use App\Models\TimeOutLog;
 use App\Models\TransferOrder;
 use App\Repositories\Interfaces\TransferOrderInterface;
 use App\Services\DY365\DyService;
@@ -20,11 +22,28 @@ class TransferOrderService
 {
     public function __construct(
         protected TransferOrderInterface $repo,
-        protected DyService $dyService
+        protected DyService $dyService,
+        protected TransferOrderCooldown $cooldown
     ) {}
 
     public function createTransfer(array $data)
     {
+        $techId = $data['tech_id'] ?? null;
+
+        if ($techId !== null) {
+            $remaining = $this->cooldown->remainingSeconds((string) $techId);
+
+            if ($remaining !== null) {
+                TimeOutLog::create([
+                    'tech_id' => $techId,
+                    'route'   => 'integration/new-transfer-order',
+                    'body'    => json_encode($data),
+                    'time'    => now(),
+                ]);
+
+                throw new TransferOrderCooldownException($remaining);
+            }
+        }
 
         // check if type = WarehouseToTechnician and get items quantity from warehouse stock and check product limit for technician
         if ($data['type'] === 'WarehouseToTechnician') {
@@ -34,6 +53,17 @@ class TransferOrderService
         }
 
         $payload = $this->mapToDyPayload($data);
+
+        // Started here — right before the DY365 call, not after it succeeds — deliberately: DY365 requests
+        // for this can be slow enough to time out on our end while DY365 itself is still processing it, and
+        // a tech retrying during that window is exactly how a duplicate transfer order gets created on
+        // DY365's side. Locking the cooldown in before the call closes that window; the trade-off is that a
+        // DY365-side rejection (insufficient stock caught above still allows an immediate retry; an error
+        // from DY365 itself below does not) now also has to wait out the cooldown before trying again, which
+        // is accepted as the safer default given what this is protecting against.
+        if ($techId !== null) {
+            $this->cooldown->recordCreated((string) $techId);
+        }
 
         // TelegramService::send(
         //     "📩 CreateTransferOrder payload \n\n" .
@@ -52,6 +82,7 @@ class TransferOrderService
             );
         }
         $transfer = $this->CreateTransferOnDb($data, $response);
+
         if ($data['type'] === 'TechnicianToTechnician') {
             $this->notifyFromTechnicianForConfirmation($data, $transfer);
         }
