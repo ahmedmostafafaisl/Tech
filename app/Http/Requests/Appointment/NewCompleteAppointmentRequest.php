@@ -27,6 +27,9 @@ class NewCompleteAppointmentRequest extends FormRequest
             'discount'                     => 'nullable|numeric|min:0',
             'total_price'                  => 'nullable|numeric|min:0',
             'customer_phone'               => 'nullable|string|min:8|max:20',
+            // DY365's own CustomerId — usually already backfilled automatically by
+            // refSingleAppointmentByBookId() before this is ever called, this stays as an optional override.
+            'customer_id'                  => 'nullable|string',
             'order_type'                   => 'required|string',
 
             // Only required when order_type is تركيب (installation).

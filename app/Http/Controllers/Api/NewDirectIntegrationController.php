@@ -1979,6 +1979,49 @@ class NewDirectIntegrationController extends Controller
         return $this->setCode(code: 200)->setData($response)->setMessage('Success.')->send();
     }
 
+    /**
+     * Local, already-recorded appointments for the authenticated tech + one customer (DY365's CustomerId —
+     * see the direct_appointments.customer_id migration), restricted to the three order_types this is meant
+     * for ("periodic maintenance" = صيانة دورية, "emergency maintenance" = صيانة طارئة, "services" = خدمات —
+     * the same vocabulary EvaluationLinkResolver uses), within today, yesterday, and the day before
+     * yesterday — there's no dedicated "visit date" column on this table, so created_at (set when the
+     * appointment was first recorded, during an actual visit) is what the window is measured against.
+     *
+     * tech_id comes from the authenticated tech, not a route parameter — a tech can only ever see their own
+     * recent appointments with this customer, never another tech's. related_book_id is this appointment's
+     * own link to a different, earlier appointment it was created as a follow-up to (set separately, at
+     * completion time) — excluded here (whereNull) so an appointment already tied to something else doesn't
+     * get offered again as if it were a fresh, unrelated one. Only the six fields asked for are returned —
+     * deliberately not the full model (no lines, no the related_appointment accessor, no ids/timestamps).
+     */
+    public function getRelatedAppointmentsForCustomer(string $customer_id)
+    {
+        $techId = Auth::user()?->tech_id;
+        $orderTypes = ['صيانة دورية', 'صيانة طارئة', 'خدمات'];
+
+        $appointments = DirectAppointment::where('tech_id', $techId)
+            ->where('customer_id', $customer_id)
+            ->whereIn('order_type', $orderTypes)
+            ->whereNull('related_book_id')
+            ->whereBetween('created_at', [now()->subDays(2)->startOfDay(), now()->endOfDay()])
+            ->latest()
+            ->get()
+            ->map(fn(DirectAppointment $appointment) => [
+                'sales_order_id' => $appointment->sales_order_id,
+                'tech_id'        => $appointment->tech_id,
+                'customer_id'    => $appointment->customer_id,
+                'book_id'        => $appointment->book_id,
+                'customer_phone' => $appointment->customer_phone,
+                'order_type'     => $appointment->order_type,
+            ])
+            ->values();
+
+        return $this->setCode(code: 200)
+            ->setData($appointments)
+            ->setMessage('Success.')
+            ->send();
+    }
+
     public function sendPaymentLinks(SendPaymentLinksRequest $request)
     {
         $validatedData = $request->validated();
@@ -2220,6 +2263,7 @@ class NewDirectIntegrationController extends Controller
                     [
                         'customer_phone' => $request->input('customer_phone') ?? null,
                         'order_type' => $request->input('order_type') ?? null,
+                        'customer_id' => $request->input('customer_id') ?? null,
                         'sales_order_id' => $sales_order_id,
                         'tech_id' => $tech_id,
                         'total_price' => (float) $request->input('total_price'),
@@ -2234,6 +2278,11 @@ class NewDirectIntegrationController extends Controller
 
                 if (! $directAppointment->sales_order_id) {
                     $directAppointment->sales_order_id = $sales_order_id;
+                    $directAppointment->save();
+                }
+
+                if (! $directAppointment->customer_id && $request->filled('customer_id')) {
+                    $directAppointment->customer_id = $request->input('customer_id');
                     $directAppointment->save();
                 }
 
@@ -3100,6 +3149,7 @@ class NewDirectIntegrationController extends Controller
                 [
                     'customer_phone' => $request->input('customer_phone') ?? null,
                     'order_type' => $request->input('order_type') ?? null,
+                    'customer_id' => $request->input('customer_id') ?? null,
                     'sales_order_id' => $sales_order_id,
                     'tech_id' => $tech_id,
                     'total_price' => 0,
@@ -3116,6 +3166,7 @@ class NewDirectIntegrationController extends Controller
             $directAppointment->update([
                 'sales_order_id' => $sales_order_id,
                 'tech_id' => $tech_id,
+                'customer_id' => $directAppointment->customer_id ?: ($request->input('customer_id') ?? null),
                 'discount' => $directAppointment->discount ?? $discount_value,
                 'required_amount' => 0,
                 'collect' => 0,
@@ -4208,6 +4259,8 @@ class NewDirectIntegrationController extends Controller
                 'Worker' => 'not found',
                 'Status' => $response['Status'] ?? null,
                 'used_balance' => 'not found',
+                'CustomerId' => null,
+                'paid_amount' => 0,
                 'sales_lines' => [],
             ];
         }
@@ -4246,6 +4299,20 @@ class NewDirectIntegrationController extends Controller
             return $line;
         }, $salesLines);
 
+        // Captured here, automatically, instead of relying on the client to send customer_id separately —
+        // this method already fetches CustomerId live from DY365 for every book_id, so it's the one place
+        // that's always exercised early enough to backfill it, rather than only when send-payment-links or
+        // complete-appointment happen to run. Only fills it in when a local DirectAppointment already exists
+        // for this book_id and doesn't have one yet — never creates a new, partial record just to hold this,
+        // and never overwrites a value that's already set.
+        $customerId = $data['CustomerId'] ?? null;
+
+        if ($customerId !== null && ($data['BookId'] ?? null)) {
+            DirectAppointment::where('book_id', $data['BookId'])
+                ->whereNull('customer_id')
+                ->update(['customer_id' => $customerId]);
+        }
+
         return [
             'sales_order_id' => $data['SalesOrderId'] ?? null,
             'required_amount' => $data['RequiredAmount'] ?? 0,
@@ -4255,11 +4322,13 @@ class NewDirectIntegrationController extends Controller
             // falling back to 0 via `?? 0`, regardless of what DY365
             // actually reported, because this array never included it.
             'PaidAmount' => $data['PaidAmount'] ?? 0,
+            'paid_amount' => $data['PaidAmount'] ?? 0,
             'TotalAmountSum' => $data['TotalAmountSum'] ?? 0,
             'OrderTypeId' => $data['OrderTypeId'] ?? null,
             'book_id' => $data['BookId'] ?? null,
             'Worker' => $data['Worker'] ?? null,
             'Status' => $data['Status'] ?? null,
+            'CustomerId' => $customerId,
             'used_balance' => abs((float) ($data['UsedBalance'] ?? 0)),
             'sales_lines' => $salesLines,
         ];

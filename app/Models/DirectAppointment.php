@@ -34,10 +34,27 @@ class DirectAppointment extends Model
         'used_balance',
         'paid_amount',
         'related_book_id',
+        'customer_id',
     ];
     protected $casts = [
         'discount' => 'float',
     ];
+
+    // Always included in this model's JSON — not something a caller has to think to request.
+    protected $appends = ['related_appointment'];
+
+    /**
+     * true only when this is an emergency-maintenance visit ("صيانة طارئة" — see EvaluationLinkResolver for
+     * the same order_type vocabulary) that includes at least one product under warranty. WarrantyStatus is
+     * a string enum ('Yes'/'No'/'None'), never a real boolean — confirmed directly from its own validation
+     * rule (NewCompleteAppointmentRequest: 'items.*.WarrantyStatus' => 'nullable|in:Yes,No,None') — so "is
+     * true" here means the value 'Yes' specifically, not any truthy/non-empty value.
+     */
+    public function getRelatedAppointmentAttribute(): bool
+    {
+        return $this->order_type === 'صيانة طارئة'
+            && $this->lines()->where('WarrantyStatus', 'Yes')->exists();
+    }
     public function payments()
     {
         return $this->hasMany(DirectAppointmentPayment::class);

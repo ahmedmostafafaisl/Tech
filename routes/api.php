@@ -689,6 +689,7 @@ Route::middleware('auth:sanctum')->prefix('new')->group(function () {
     Route::post('/integration/get-or-update-invoice-by-book-id/{book_id}', [NewDirectIntegrationController::class, 'getOrCreateInvoiceByBookId']);
 
     Route::post('/integration/get-transfer-orders/{tech_id}', [NewDirectIntegrationController::class, 'getTransferOrders']);
+    Route::post('/integration/related-appointments/{customer_id}', [NewDirectIntegrationController::class, 'getRelatedAppointmentsForCustomer']);
     Route::post('/integration/create-transfer-order', [NewDirectIntegrationController::class, 'createTransferOrder']);
     Route::post('/integration/update-transfer-order', [NewDirectIntegrationController::class, 'updateTransferOrderStatus']);
     Route::post('/integration/delete-transfer-order', [NewDirectIntegrationController::class, 'deleteTransferOrder']);
