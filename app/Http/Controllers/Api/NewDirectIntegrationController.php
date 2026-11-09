@@ -1994,16 +1994,25 @@ class NewDirectIntegrationController extends Controller
      * get offered again as if it were a fresh, unrelated one. Only the six fields asked for are returned —
      * deliberately not the full model (no lines, no the related_appointment accessor, no ids/timestamps).
      */
-    public function getRelatedAppointmentsForCustomer(string $customer_id)
+
+    public function getRelatedAppointmentsForCustomer(string $customer_id, Request $request)
     {
         $techId = Auth::user()?->tech_id;
         $orderTypes = ['صيانة دورية', 'صيانة طارئة', 'خدمات'];
+        $book_id = $request->book_id;
 
         $appointments = DirectAppointment::where('tech_id', $techId)
             ->where('customer_id', $customer_id)
+            ->when(
+                filled($book_id),
+                fn($query) => $query->where('book_id', '!=', $book_id)
+            )
             ->whereIn('order_type', $orderTypes)
             ->whereNull('related_book_id')
-            ->whereBetween('created_at', [now()->subDays(2)->startOfDay(), now()->endOfDay()])
+            ->whereBetween('created_at', [
+                now()->subDays(2)->startOfDay(),
+                now()->endOfDay()
+            ])
             ->latest()
             ->get()
             ->map(fn(DirectAppointment $appointment) => [
@@ -2021,6 +2030,7 @@ class NewDirectIntegrationController extends Controller
             ->setMessage('Success.')
             ->send();
     }
+
 
     public function sendPaymentLinks(SendPaymentLinksRequest $request)
     {

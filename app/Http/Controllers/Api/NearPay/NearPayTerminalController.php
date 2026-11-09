@@ -205,6 +205,7 @@ class NearPayTerminalController extends Controller
      */
     public function setDefault(NearPayTerminal $terminal)
     {
+
         NearPayTerminal::where('is_default', true)->update(['is_default' => false]);
 
         $terminal->update(['is_default' => true]);
