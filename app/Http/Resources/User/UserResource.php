@@ -52,6 +52,7 @@ class UserResource extends JsonResource
         return [
             'id' => $terminal->id,
             'terminal_id' => $terminal->terminal_id,
+            'tid' => $terminal->tid,
             'name' => $terminal->name,
             'assigned_at' => optional($terminal->assigned_at)->format('Y-m-d H:i:s'),
             'is_default' => (bool) $terminal->is_default,

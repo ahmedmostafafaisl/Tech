@@ -656,6 +656,14 @@ class NewDirectIntegrationController extends Controller
                 ->calculate($requiredAmount, $paidAmount, $usedBalance);
         }
 
+        // Same rule as DirectAppointment::getRelatedAppointmentAttribute() (emergency maintenance = صيانة
+        // طارئة, with at least one line under warranty — WarrantyStatus is the string enum 'Yes'/'No'/'None',
+        // never a real boolean), computed here from the live DY365 data this endpoint already fetched
+        // (OrderTypeId, SalesLines) rather than from the local DirectAppointment record — this stays
+        // accurate even when $direct is null or its local lines haven't been synced yet.
+        $appointment['related_appointment'] = ($appointment['OrderTypeId'] ?? null) === 'صيانة طارئة'
+            && collect($appointment['SalesLines'] ?? [])->contains(fn($line) => ($line['WarrantyStatus'] ?? null) === 'Yes');
+
         return $this->setCode(200)
             ->setData($appointment)
             ->setMessage('Success.')
@@ -1994,25 +2002,16 @@ class NewDirectIntegrationController extends Controller
      * get offered again as if it were a fresh, unrelated one. Only the six fields asked for are returned —
      * deliberately not the full model (no lines, no the related_appointment accessor, no ids/timestamps).
      */
-
-    public function getRelatedAppointmentsForCustomer(string $customer_id, Request $request)
+    public function getRelatedAppointmentsForCustomer(string $customer_id)
     {
         $techId = Auth::user()?->tech_id;
         $orderTypes = ['صيانة دورية', 'صيانة طارئة', 'خدمات'];
-        $book_id = $request->book_id;
 
         $appointments = DirectAppointment::where('tech_id', $techId)
             ->where('customer_id', $customer_id)
-            ->when(
-                filled($book_id),
-                fn($query) => $query->where('book_id', '!=', $book_id)
-            )
             ->whereIn('order_type', $orderTypes)
             ->whereNull('related_book_id')
-            ->whereBetween('created_at', [
-                now()->subDays(2)->startOfDay(),
-                now()->endOfDay()
-            ])
+            ->whereBetween('created_at', [now()->subDays(2)->startOfDay(), now()->endOfDay()])
             ->latest()
             ->get()
             ->map(fn(DirectAppointment $appointment) => [
@@ -2030,7 +2029,6 @@ class NewDirectIntegrationController extends Controller
             ->setMessage('Success.')
             ->send();
     }
-
 
     public function sendPaymentLinks(SendPaymentLinksRequest $request)
     {
