@@ -51,25 +51,15 @@ class InvoiceWhatsAppSenderService
 
         $orderType = DirectAppointment::where('book_id', $bookId)->latest('id')->value('order_type');
 
-        // OrderTypeId, book_id, tech_user_name and district encrypted into the link itself (see
-        // EvaluationLinkResolver::buildWithEncryptedData()) — a failed fetch here (DY365 down, etc.) still
-        // falls back to a plain, working link rather than blocking the invoice send over it.
-        try {
-            $evaluationLinkData = $this->evaluationLinkDataFetcher->fetchForBookId($bookId);
-            $evaluationLink = EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('InvoiceWhatsAppSenderService: could not fetch evaluation link data, sending plain link', [
-                'book_id' => $bookId,
-                'error'   => $e->getMessage(),
-            ]);
-
-            $evaluationLink = EvaluationLinkResolver::resolve($orderType);
-        }
+        $evaluation = $this->buildEvaluationLinkForInvoice($bookId, $orderType);
 
         // Same approved template as the existing cycle (it's the one real, Meta-approved template with a
         // Document header) — 2 body variables, the evaluation link once for each half of the bilingual text,
-        // matching the template's real, confirmed shape.
-        $bodyParameters = collect([$evaluationLink, $evaluationLink])
+        // matching the template's real, confirmed shape. invoice_evaluation_active (see
+        // buildEvaluationLinkForInvoice()) controls whether that link carries real tracking data or is just
+        // the plain, un-tracked page — the template's own fixed 2-parameter structure is unaffected either
+        // way, so this never risks a parameter-count mismatch with the already-approved template.
+        $bodyParameters = collect([$evaluation['url'], $evaluation['url']])
             ->map(fn($value) => ['type' => 'text', 'text' => $value])
             ->all();
 
@@ -81,7 +71,7 @@ class InvoiceWhatsAppSenderService
         try {
             $response = $this->whatsApp->sendTemplateMessage($phone, $templateName, $bodyParameters, [], 'ar', $documentHeader);
         } catch (\Throwable $e) {
-            return ['success' => false, 'error' => $e->getMessage()];
+            return ['success' => false, 'error' => $e->getMessage(), 'evaluation' => $evaluation];
         }
 
         $responseBody = $response instanceof Response ? $response->json() : $response;
@@ -93,15 +83,64 @@ class InvoiceWhatsAppSenderService
             && ($responseBody['status'] ?? null) !== 'skipped';
 
         if (! $sent) {
-            return ['success' => false, 'error' => 'Not accepted by Meta', 'response' => $responseBody];
+            return ['success' => false, 'error' => 'Not accepted by Meta', 'response' => $responseBody, 'evaluation' => $evaluation];
         }
 
         $messageId = $responseBody['messages'][0]['id'] ?? null;
 
         if (! $messageId) {
-            return ['success' => false, 'error' => 'Meta accepted the request but returned no message id', 'response' => $responseBody];
+            return ['success' => false, 'error' => 'Meta accepted the request but returned no message id', 'response' => $responseBody, 'evaluation' => $evaluation];
         }
 
-        return ['success' => true, 'message_id' => $messageId, 'response' => $responseBody];
+        return ['success' => true, 'message_id' => $messageId, 'response' => $responseBody, 'evaluation' => $evaluation];
+    }
+
+    /**
+     * invoice_evaluation_active (default on, preserving existing behavior) controls whether the link sent
+     * alongside the invoice carries real, encrypted tracking data or is just the plain, un-tracked
+     * evaluation page — never whether a link is sent at all, since the already-approved template's 2 body
+     * parameters are fixed and this must never risk a parameter-count mismatch with it. When disabled, the
+     * EvaluationLinkDataFetcher call (a live DY365 lookup) is skipped entirely, not just its result ignored.
+     *
+     * @return array{type: ?string, url: string, data: ?array, status: string, error: ?string}
+     */
+    private function buildEvaluationLinkForInvoice(string $bookId, ?string $orderType): array
+    {
+        if (! Setting::isActive('invoice_evaluation_active', true)) {
+            return [
+                'type'   => $orderType,
+                'url'    => EvaluationLinkResolver::resolve($orderType),
+                'data'   => null,
+                'status' => 'skipped',
+                'error'  => null,
+            ];
+        }
+
+        try {
+            $evaluationLinkData = $this->evaluationLinkDataFetcher->fetchForBookId($bookId);
+
+            return [
+                'type'   => $orderType,
+                'url'    => EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData),
+                'data'   => $evaluationLinkData,
+                'status' => 'sent',
+                'error'  => null,
+            ];
+        } catch (\Throwable $e) {
+            // A failed fetch here (DY365 down, etc.) still falls back to a plain, working link rather than
+            // blocking the invoice send over it.
+            \Illuminate\Support\Facades\Log::warning('InvoiceWhatsAppSenderService: could not fetch evaluation link data, sending plain link', [
+                'book_id' => $bookId,
+                'error'   => $e->getMessage(),
+            ]);
+
+            return [
+                'type'   => $orderType,
+                'url'    => EvaluationLinkResolver::resolve($orderType),
+                'data'   => null,
+                'status' => 'failed',
+                'error'  => $e->getMessage(),
+            ];
+        }
     }
 }

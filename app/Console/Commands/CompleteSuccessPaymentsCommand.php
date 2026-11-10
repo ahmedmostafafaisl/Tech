@@ -260,6 +260,8 @@ class CompleteSuccessPaymentsCommand extends Command
                     'complete_v2_calling' => "done:" . now()->format('Y-m-d H:i:s'),
                 ]);
 
+                $this->sendStandaloneEvaluationIfEnabled($appointment);
+
                 $this->info("✅ Appointment {$appointmentId} completed successfully.");
                 return Command::SUCCESS;
             }
@@ -448,6 +450,48 @@ class CompleteSuccessPaymentsCommand extends Command
         $this->error("❌ {$message}");
 
         return Command::FAILURE;
+    }
+
+    /**
+     * The one place a standalone evaluation is sent — right after DY365 has just confirmed the completion
+     * sync succeeded, never before (see PaymentCompletionDispatcher::dispatch(), which used to send this
+     * prematurely, right after only queuing this same command). Gated by standalone_evaluation_active
+     * (default on, preserving the previous "evaluations are always sent" behavior unless turned off) —
+     * independent of invoice_evaluation_active, which only affects the evaluation link sent alongside an
+     * invoice (InvoiceWhatsAppSenderService), a completely separate send.
+     */
+    protected function sendStandaloneEvaluationIfEnabled(DirectAppointment $appointment): void
+    {
+        if (! \App\Models\Setting::isActive('standalone_evaluation_active', true)) {
+            return;
+        }
+
+        if (empty($appointment->customer_phone) || empty($appointment->order_type)) {
+            Log::warning('Skipping standalone evaluation dispatch due to missing phone or order type', [
+                'appointment_id' => $appointment->id,
+                'customer_phone' => $appointment->customer_phone,
+                'order_type'     => $appointment->order_type,
+            ]);
+
+            return;
+        }
+
+        try {
+            app(\App\Http\Controllers\Api\Evaluation\EvaluationMessageController::class)->createAndSendEvaluation(
+                $appointment->customer_phone,
+                $appointment->order_type,
+                $appointment->book_id
+            );
+        } catch (\Throwable $e) {
+            // The Dynamics sync itself already succeeded and is not rolled back for this — a failure to
+            // send the evaluation afterward is logged, not allowed to turn a genuinely successful
+            // completion into a failed command run.
+            Log::warning('Standalone evaluation send failed after a successful completion', [
+                'appointment_id' => $appointment->id,
+                'book_id'        => $appointment->book_id,
+                'error'          => $e->getMessage(),
+            ]);
+        }
     }
 
     protected function fail(

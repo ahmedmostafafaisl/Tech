@@ -113,6 +113,12 @@ return [
         'api_key' => env('EXPORT_API_KEY'),
     ],
 
+    // Deliberately separate from APP_KEY — see EvaluationLinkResolver::encrypter() for why and how to
+    // generate a value for this. Format matches APP_KEY's own convention: "base64:<32 random bytes>".
+    'evaluation_link' => [
+        'key' => env('EVALUATION_LINK_ENCRYPTION_KEY'),
+    ],
+
     'powerbi' => [
         'username' => env('POWERBI_USERNAME', 'bi@admin.com'),
         'password' => env('POWERBI_PASSWORD', 'bi@@admin@@'),

@@ -2,7 +2,6 @@
 
 namespace App\Services\Payment;
 
-use App\Http\Controllers\Api\Evaluation\EvaluationMessageController;
 use App\Http\Controllers\Api\NewDirectIntegrationController;
 use App\Models\AppointmentTransactionSerial;
 use App\Models\DirectAppointment;
@@ -283,22 +282,14 @@ class PaymentCompletionDispatcher
             'bodyB64'       => $payloadB64,
         ]);
 
-        // 7) send WhatsApp evaluation if required
-        //check if customer phone and order type are available before sending evaluation
-        if (empty($appointment->customer_phone) || empty($appointment->order_type)) {
-            Log::warning('Skipping evaluation message dispatch due to missing phone or order type', [
-                'appointment_id' => $appointment->id,
-                'customer_phone' => $appointment->customer_phone,
-                'order_type'     => $appointment->order_type,
-            ]);
-            return ['ok' => true, 'dispatched' => true, 'evaluation_skipped' => true, 'reason' => 'missing_phone_or_order_type'];
-        }
-        app(EvaluationMessageController::class)->createAndSendEvaluation(
-            $appointment->customer_phone,
-            $appointment->order_type,
-            $appointment->book_id
-        );
-
+        // Evaluation is NOT sent from here anymore — this only queues payments:complete, it does not wait
+        // for or confirm that job's own Dynamics sync actually succeeds. Sending here meant every caller of
+        // this method (storeAttachments, the complete-form submission, the dashboard's manual
+        // "send-completion", Tamara's delayed retry) could trigger a standalone evaluation before Dynamics
+        // sync was even attempted, let alone confirmed. The evaluation send now lives in
+        // CompleteSuccessPaymentsCommand (the payments:complete command itself), specifically in the branch
+        // where DY365's completeSuccessPaymentsV2 response actually confirms Status === true — the one
+        // place this is genuinely known to have succeeded.
         return ['ok' => true, 'dispatched' => true];
     }
 

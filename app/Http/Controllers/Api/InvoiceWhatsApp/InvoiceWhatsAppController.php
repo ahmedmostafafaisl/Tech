@@ -10,16 +10,17 @@ use App\Models\InvoiceWhatsAppMessage;
 use App\Models\Setting;
 
 /**
- * The entry point for the new, independent invoice-via-WhatsApp cycle — entirely separate from
- * InvoiceController::sendInvoiceLink(), which is untouched and keeps working exactly as before. Gated by its
- * own setting (new_invoice_whatsapp_active, default OFF) checked here, before anything is even queued — a
- * disabled cycle should say so immediately, not silently queue a job that will no-op.
+ * The single public entry point for invoice sending (POST /invoice/send-link) — InvoiceController::
+ * sendInvoiceLink() and the old SendInvoiceLinkJob/short_links cycle are no longer reachable from any route.
+ * Gated by new_invoice_whatsapp_active, now defaulting to ON since this is the only invoice-sending path,
+ * not an opt-in experiment — still checked before anything is queued, so turning it off (e.g. during an
+ * incident) says so immediately rather than silently queuing a job that will no-op.
  */
 class InvoiceWhatsAppController extends Controller
 {
     public function send(SendInvoiceWhatsAppRequest $request)
     {
-        if (! Setting::isActive('new_invoice_whatsapp_active', false)) {
+        if (! Setting::isActive('new_invoice_whatsapp_active', true)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Sending invoices via WhatsApp (new cycle) is currently disabled.',

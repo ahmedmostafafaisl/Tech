@@ -25,6 +25,20 @@ class InvoiceWhatsAppMessage extends Model
         'delivery_error',
         'error',
         'response',
+        'evaluation_type',
+        'evaluation_url',
+        'evaluation_data',
+        'evaluation_status',
+        'evaluation_error',
+        'retry_count',
+        'last_retried_at',
+        'retrying_at',
+    ];
+
+    protected $casts = [
+        'evaluation_data' => 'array',
+        'last_retried_at' => 'datetime',
+        'retrying_at'     => 'datetime',
     ];
 
     public function isPending(): bool

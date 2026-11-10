@@ -162,9 +162,18 @@ class WhatsAppService
         return $response;
     }
 
-    public function sendSalesEvaluation(string $mobile, $template): mixed
+    /**
+     * $evaluationLink, when given, is sent as this template's one body parameter — the same plain-text
+     * mechanism already used for the invoice-alongside evaluation link (InvoiceWhatsAppSenderService), not
+     * a dynamic URL button: it works with any already-approved template that has a single body placeholder,
+     * without needing to confirm Meta has a dynamic-URL button configured for it. Omitting it keeps the old,
+     * no-parameters behavior for any caller not yet passing a link.
+     */
+    public function sendSalesEvaluation(string $mobile, $template, ?string $evaluationLink = null): mixed
     {
-        $bodyParameters = [];
+        $bodyParameters = $evaluationLink !== null
+            ? [['type' => 'text', 'text' => $evaluationLink]]
+            : [];
         $buttonParameters = [];
         $service = app(\App\Services\WhatsApp\WhatsAppConfirmationService::class);
         $response = $service->sendTemplateMessage(

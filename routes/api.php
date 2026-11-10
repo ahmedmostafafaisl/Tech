@@ -1013,13 +1013,12 @@ Route::get('/invoice2/{id}/view', [Invoice2Controller::class, 'stream'])
 Route::get('/invoice/{id}/download', [Invoice2Controller::class, 'download'])
     ->name('invoice.download');
 
-Route::post('/invoice/send-link', [InvoiceController::class, 'sendInvoiceLink'])
+// Unified: the one public invoice-sending endpoint now goes straight to the new,
+// InvoiceWhatsAppMessage-tracked cycle (InvoiceWhatsAppController::send) — InvoiceController::sendInvoiceLink
+// and the old SendInvoiceLinkJob (short_links, SMS-capable) are no longer reachable from any route; nothing
+// deletes that code, so rolling back is just restoring this route.
+Route::post('/invoice/send-link', [\App\Http\Controllers\Api\InvoiceWhatsApp\InvoiceWhatsAppController::class, 'send'])
     ->name('invoice.send-link');
-
-// The new, independent invoice-via-WhatsApp cycle — a deliberately separate route from the one above, which
-// is untouched. Gated by its own setting (new_invoice_whatsapp_active); see InvoiceWhatsAppController.
-Route::post('/invoice-whatsapp/send', [\App\Http\Controllers\Api\InvoiceWhatsApp\InvoiceWhatsAppController::class, 'send'])
-    ->name('invoice-whatsapp.send');
 
 Route::middleware('auth:sanctum')->get('/invoice-whatsapp', [\App\Http\Controllers\Api\InvoiceWhatsApp\InvoiceWhatsAppController::class, 'index'])
     ->name('invoice-whatsapp.index');

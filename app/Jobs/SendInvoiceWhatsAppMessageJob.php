@@ -42,7 +42,12 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
     {
         if ($this->existingMessageId) {
             $message = InvoiceWhatsAppMessage::findOrFail($this->existingMessageId);
-            $message->update(['status' => 'pending', 'error' => null]);
+            $message->update([
+                'status'          => 'pending',
+                'error'           => null,
+                'retry_count'     => $message->retry_count + 1,
+                'last_retried_at' => now(),
+            ]);
         } else {
             $message = InvoiceWhatsAppMessage::create([
                 'book_id' => $this->bookId,
@@ -51,66 +56,88 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
             ]);
         }
 
+        // retrying_at (set by the retry command just before dispatching this job, see
+        // RetryFailedInvoiceWhatsAppMessagesCommand) is this row's lock against a second, overlapping retry
+        // run picking it up again mid-attempt — cleared in the finally below no matter how this method
+        // exits (success, failure, or an early return), since every one of those is "this attempt is
+        // finished", whether or not it was actually a retry at all.
         try {
-            $response = $dyService->getOrCreateInvoiceByBookId(['bookId' => $this->bookId]);
-        } catch (\Throwable $e) {
-            Log::warning('SendInvoiceWhatsAppMessageJob: DY365 call failed, nothing sent', [
+            try {
+                $response = $dyService->getOrCreateInvoiceByBookId(['bookId' => $this->bookId]);
+            } catch (\Throwable $e) {
+                Log::warning('SendInvoiceWhatsAppMessageJob: DY365 call failed, nothing sent', [
+                    'book_id' => $this->bookId,
+                    'phone'   => $this->phone,
+                    'error'   => $e->getMessage(),
+                ]);
+
+                $message->update(['status' => 'failed', 'error' => 'DY365 call failed: ' . $e->getMessage()]);
+
+                return;
+            }
+
+            if (
+                ! is_array($response)
+                || empty($response['Status'])
+                || empty($response['Data'])
+                || ! is_array($response['Data'])
+            ) {
+                Log::warning('SendInvoiceWhatsAppMessageJob: no invoice data from DY365, nothing sent', [
+                    'book_id'  => $this->bookId,
+                    'phone'    => $this->phone,
+                    'response' => $response,
+                ]);
+
+                $message->update(['status' => 'failed', 'error' => 'Invoice not generated yet']);
+
+                return;
+            }
+
+            $result = $sender->send($this->bookId, $this->phone);
+
+            // The evaluation link's own outcome (InvoiceWhatsAppSenderService::buildEvaluationLinkForInvoice())
+            // is tracked regardless of whether the invoice send itself succeeds or fails below — a failed
+            // evaluation-link fetch never fails or blocks the invoice send, so these two outcomes are
+            // recorded independently, not only on the happy path.
+            $evaluation = $result['evaluation'] ?? null;
+            $evaluationFields = $evaluation ? [
+                'evaluation_type'   => $evaluation['type'] ?? null,
+                'evaluation_url'    => $evaluation['url'] ?? null,
+                'evaluation_data'   => $evaluation['data'] ?? null,
+                'evaluation_status' => $evaluation['status'] ?? null,
+                'evaluation_error'  => $evaluation['error'] ?? null,
+            ] : [];
+
+            if (! empty($result['success'])) {
+                $message->update(array_merge($evaluationFields, [
+                    'status'     => 'sent',
+                    'message_id' => $result['message_id'],
+                    'response'   => json_encode($result['response'] ?? null),
+                ]));
+
+                return;
+            }
+
+            Log::warning('SendInvoiceWhatsAppMessageJob: send failed', [
                 'book_id' => $this->bookId,
                 'phone'   => $this->phone,
-                'error'   => $e->getMessage(),
+                'error'   => $result['error'] ?? null,
             ]);
 
-            $message->update(['status' => 'failed', 'error' => 'DY365 call failed: ' . $e->getMessage()]);
+            $message->update(array_merge($evaluationFields, [
+                'status'   => 'failed',
+                'error'    => $result['error'] ?? 'Unknown error',
+                'response' => json_encode($result['response'] ?? null),
+            ]));
 
-            return;
+            // TelegramService::send(
+            //     "⚠️ New-cycle invoice WhatsApp send failed\n\n"
+            //         . "book_id: {$this->bookId}\n"
+            //         . "phone: {$this->phone}\n"
+            //         . "error: " . ($result['error'] ?? 'Unknown error')
+            // );
+        } finally {
+            $message->update(['retrying_at' => null]);
         }
-
-        if (
-            ! is_array($response)
-            || empty($response['Status'])
-            || empty($response['Data'])
-            || ! is_array($response['Data'])
-        ) {
-            Log::warning('SendInvoiceWhatsAppMessageJob: no invoice data from DY365, nothing sent', [
-                'book_id'  => $this->bookId,
-                'phone'    => $this->phone,
-                'response' => $response,
-            ]);
-
-            $message->update(['status' => 'failed', 'error' => 'Invoice not generated yet']);
-
-            return;
-        }
-
-        $result = $sender->send($this->bookId, $this->phone);
-
-        if (! empty($result['success'])) {
-            $message->update([
-                'status'     => 'sent',
-                'message_id' => $result['message_id'],
-                'response'   => json_encode($result['response'] ?? null),
-            ]);
-
-            return;
-        }
-
-        Log::warning('SendInvoiceWhatsAppMessageJob: send failed', [
-            'book_id' => $this->bookId,
-            'phone'   => $this->phone,
-            'error'   => $result['error'] ?? null,
-        ]);
-
-        $message->update([
-            'status'   => 'failed',
-            'error'    => $result['error'] ?? 'Unknown error',
-            'response' => json_encode($result['response'] ?? null),
-        ]);
-
-        // TelegramService::send(
-        //     "⚠️ New-cycle invoice WhatsApp send failed\n\n"
-        //         . "book_id: {$this->bookId}\n"
-        //         . "phone: {$this->phone}\n"
-        //         . "error: " . ($result['error'] ?? 'Unknown error')
-        // );
     }
 }

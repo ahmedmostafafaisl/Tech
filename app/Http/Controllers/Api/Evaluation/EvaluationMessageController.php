@@ -150,27 +150,38 @@ class EvaluationMessageController extends Controller
             ]);
         }
 
-        // Determine template
         $orderType = trim($evaluation->order_type);
 
-        if (in_array($orderType, ['تركيب'])) {
-            $template = 'sales_evaluation';
-        } elseif (in_array($orderType, ['صيانة دورية', 'خدمات'])) {
-            $template = 'after_sales_evaluation';
-        } elseif (in_array($orderType, ['منتجات'])) {
-            $template = 'products_evaluation';
-        } elseif (in_array($orderType, ['صيانة طارئة'])) {
-            $template = 'emergency_maintenance_evaluation';
-        } else {
+        if (! in_array($orderType, ['تركيب', 'صيانة دورية', 'خدمات', 'منتجات', 'صيانة طارئة'], true)) {
             return response()->json([
                 'message' => 'Unsupported order type.',
             ], 400);
         }
 
+        // One template for every evaluation type now (sales, after-sales, products, emergency maintenance)
+        // — what used to pick a different approved template per type instead picks a different evaluation
+        // page via EvaluationLinkResolver, sent as this one template's body parameter. The template name
+        // itself stays a Setting (same pattern as invoice_whatsapp_template_name) so it can be changed
+        // without a code deploy; customer_evaluation_link is the already-approved template this defaults to.
+        $templateName = \App\Models\Setting::get('evaluation_whatsapp_template_name', 'customer_evaluation_link');
+
+        try {
+            $evaluationLinkData = app(\App\Services\Evaluation\EvaluationLinkDataFetcher::class)->fetchForBookId($bookId);
+            $evaluationLink = \App\Services\Evaluation\EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('createAndSendEvaluation: could not fetch evaluation link data, sending plain link', [
+                'book_id' => $bookId,
+                'error'   => $e->getMessage(),
+            ]);
+
+            $evaluationLink = \App\Services\Evaluation\EvaluationLinkResolver::resolve($orderType);
+        }
+
         // Send WhatsApp message
         $sendEvaluation = $this->whatsAppService->sendSalesEvaluation(
             $evaluation->phone,
-            $template
+            $templateName,
+            $evaluationLink
         );
 
         $response = $sendEvaluation->json();
