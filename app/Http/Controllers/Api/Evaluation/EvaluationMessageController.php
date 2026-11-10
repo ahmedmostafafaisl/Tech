@@ -165,9 +165,25 @@ class EvaluationMessageController extends Controller
         // without a code deploy; customer_evaluation_link is the already-approved template this defaults to.
         $templateName = \App\Models\Setting::get('evaluation_whatsapp_template_name', 'customer_evaluation_link');
 
+        // Falls back to $evaluation->phone (the originally-passed/stored number) when DY365's own
+        // CustomerPhoneNumber isn't available — never changes what's stored on the EvaluationMessage record
+        // itself (still keyed, found and created by book_id, same as before), only who the WhatsApp message
+        // actually goes to.
+        $recipientPhone = $evaluation->phone;
+
         try {
             $evaluationLinkData = app(\App\Services\Evaluation\EvaluationLinkDataFetcher::class)->fetchForBookId($bookId);
-            $evaluationLink = \App\Services\Evaluation\EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
+
+            if (! empty($evaluationLinkData['customer_phone'])) {
+                $recipientPhone = $evaluationLinkData['customer_phone'];
+            }
+
+            $fullLink = \App\Services\Evaluation\EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
+
+            // Shortened before being sent — the encrypted data query param alone can run 300+ characters,
+            // and Meta rejects the whole template send once the rendered body exceeds 1024 characters
+            // (confirmed in production: #132005 "Translated text too long").
+            $evaluationLink = \App\Services\Evaluation\EvaluationLinkResolver::shorten($fullLink, $bookId, $recipientPhone, $evaluationLinkData);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('createAndSendEvaluation: could not fetch evaluation link data, sending plain link', [
                 'book_id' => $bookId,
@@ -179,7 +195,7 @@ class EvaluationMessageController extends Controller
 
         // Send WhatsApp message
         $sendEvaluation = $this->whatsAppService->sendSalesEvaluation(
-            $evaluation->phone,
+            $recipientPhone,
             $templateName,
             $evaluationLink
         );

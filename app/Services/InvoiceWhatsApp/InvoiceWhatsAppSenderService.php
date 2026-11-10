@@ -118,10 +118,16 @@ class InvoiceWhatsAppSenderService
 
         try {
             $evaluationLinkData = $this->evaluationLinkDataFetcher->fetchForBookId($bookId);
+            $fullUrl = EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
 
+            // Shortened before being sent — the encrypted data query param alone can run 300+ characters,
+            // and Meta rejects the whole template send once the rendered body exceeds 1024 characters
+            // (confirmed in production: #132005 "Translated text too long"). evaluation_data (tracked
+            // separately, above) already carries the same fields for debugging, so nothing about the real
+            // link is lost by storing the short one here instead of the long one it points to.
             return [
                 'type'   => $orderType,
-                'url'    => EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData),
+                'url'    => EvaluationLinkResolver::shorten($fullUrl, $bookId, null, $evaluationLinkData),
                 'data'   => $evaluationLinkData,
                 'status' => 'sent',
                 'error'  => null,

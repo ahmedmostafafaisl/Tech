@@ -2,7 +2,9 @@
 
 namespace App\Services\Evaluation;
 
+use App\Models\ShortLink;
 use Illuminate\Encryption\Encrypter;
+use Illuminate\Support\Str;
 
 /**
  * Maps an appointment's order_type to its evaluation/rating page — conceptually the same four-way split
@@ -15,19 +17,33 @@ use Illuminate\Encryption\Encrypter;
  */
 class EvaluationLinkResolver
 {
-    private const DEFAULT_LINK = 'https://www.naqi.sa/rate-sales/';
+    private const DEFAULT_PATH = '/rate-sales/';
+
+    /**
+     * Prod (https://www.naqi.sa) by default — set EVALUATION_LINK_BASE_DOMAIN=https://naqi-ecommerce-develop.naqi.sa
+     * in .env to switch every evaluation page to develop instead, without touching the paths themselves
+     * below. No trailing slash on the configured value — see config/services.php.
+     */
+    private static function baseDomain(): string
+    {
+        $configured = config('services.evaluation_link.base_domain');
+
+        return ! empty($configured) ? (string) $configured : 'https://www.naqi.sa';
+    }
 
     public static function resolve(?string $orderType): string
     {
         $orderType = trim((string) $orderType);
 
-        return match (true) {
-            in_array($orderType, ['تركيب'], true) => self::DEFAULT_LINK,
-            in_array($orderType, ['صيانة دورية', 'خدمات'], true) => 'https://www.naqi.sa/rate-after-sales-service/',
-            in_array($orderType, ['منتجات'], true) => 'https://www.naqi.sa/rate-products/',
-            in_array($orderType, ['صيانة طارئة'], true) => 'https://www.naqi.sa/rate-urgent-maintenance/',
-            default => self::DEFAULT_LINK,
+        $path = match (true) {
+            in_array($orderType, ['تركيب'], true) => self::DEFAULT_PATH,
+            in_array($orderType, ['صيانة دورية', 'خدمات'], true) => '/rate-after-sales-service/',
+            in_array($orderType, ['منتجات'], true) => '/rate-products/',
+            in_array($orderType, ['صيانة طارئة'], true) => '/rate-urgent-maintenance/',
+            default => self::DEFAULT_PATH,
         };
+
+        return self::baseDomain() . $path;
     }
 
     /**
@@ -103,5 +119,43 @@ class EvaluationLinkResolver
         }
 
         return new Encrypter($key, 'AES-256-CBC');
+    }
+
+    /**
+     * Wraps any evaluation link (buildWithEncryptedData()'s or the plain resolve() fallback) in the
+     * existing short-link mechanism (ShortLink, the same one invoice links already use — see
+     * SendInvoiceLinkJob::generateUniqueCode()) — confirmed necessary in production: the encrypted data
+     * query param alone can run 300+ characters, and Meta rejects a WhatsApp template send outright
+     * (#132005 "Translated text too long") once the rendered body — template text plus every parameter —
+     * exceeds 1024 characters. A short link (https://{domain}/{8-char code}) is a small, fixed length
+     * regardless of how much is encoded in the real URL behind it, so this is the one place that risk is
+     * actually eliminated, rather than something every caller has to remember to account for.
+     *
+     * Call this only for a link that's about to be sent as a WhatsApp template parameter — not for every
+     * use of resolve()/buildWithEncryptedData() (e.g. a link only ever shown in an admin dashboard has no
+     * reason to go through this).
+     *
+     * $evaluationData, when given, marks this row type='evaluation' and records the same plain fields the
+     * link itself was built from (OrderTypeId, book_id, tech_user_name, district) — distinguishing an
+     * evaluation short link from an invoice one on the same, already-existing short_links table, and giving
+     * the standalone evaluation send (which has no tracking table of its own) the same visibility
+     * invoice_whatsapp_messages.evaluation_data already provides for the invoice-alongside cycle.
+     */
+    public static function shorten(string $fullUrl, ?string $bookId = null, ?string $phone = null, ?array $evaluationData = null): string
+    {
+        do {
+            $code = Str::random(8);
+        } while (ShortLink::where('code', $code)->exists());
+
+        ShortLink::create([
+            'code'            => $code,
+            'url'             => $fullUrl,
+            'book_id'         => $bookId,
+            'phone'           => $phone,
+            'type'            => $evaluationData !== null ? 'evaluation' : null,
+            'evaluation_data' => $evaluationData,
+        ]);
+
+        return url('/' . $code);
     }
 }

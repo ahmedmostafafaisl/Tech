@@ -113,10 +113,15 @@ return [
         'api_key' => env('EXPORT_API_KEY'),
     ],
 
-    // Deliberately separate from APP_KEY — see EvaluationLinkResolver::encrypter() for why and how to
-    // generate a value for this. Format matches APP_KEY's own convention: "base64:<32 random bytes>".
     'evaluation_link' => [
+        // Deliberately separate from APP_KEY — see EvaluationLinkResolver::encrypter() for why and how to
+        // generate a value for this. Format matches APP_KEY's own convention: "base64:<32 random bytes>".
         'key' => env('EVALUATION_LINK_ENCRYPTION_KEY'),
+
+        // Switches every evaluation page (rate-sales, rate-products, etc. — see
+        // EvaluationLinkResolver::resolve()) between prod (default) and develop, without touching the paths
+        // themselves. No trailing slash — resolve() already starts each path with one.
+        'base_domain' => env('EVALUATION_LINK_BASE_DOMAIN', 'https://www.naqi.sa'),
     ],
 
     'powerbi' => [
