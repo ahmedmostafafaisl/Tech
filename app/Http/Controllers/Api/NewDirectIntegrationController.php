@@ -4340,6 +4340,10 @@ class NewDirectIntegrationController extends Controller
             'Status' => $data['Status'] ?? null,
             'CustomerId' => $customerId,
             'district' => $data['District'] ?? 'not found',
+            // The tech's own username, looked up by Worker (DY365's own id for them) — $rec is the same
+            // User lookup (via getTechnicianUser()) already used above to pick a fallback warehouse for
+            // stock lookups, reused here rather than querying twice.
+            'tech_user_name' => $rec?->username,
             'used_balance' => abs((float) ($data['UsedBalance'] ?? 0)),
             'sales_lines' => $salesLines,
         ];

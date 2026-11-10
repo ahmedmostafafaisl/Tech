@@ -22,7 +22,10 @@ use Illuminate\Http\Client\Response;
  */
 class InvoiceWhatsAppSenderService
 {
-    public function __construct(private readonly WhatsAppConfirmationService $whatsApp) {}
+    public function __construct(
+        private readonly WhatsAppConfirmationService $whatsApp,
+        private readonly \App\Services\Evaluation\EvaluationLinkDataFetcher $evaluationLinkDataFetcher,
+    ) {}
 
     /**
      * @return array{success: bool, message_id?: string, error?: string, response?: mixed}
@@ -47,7 +50,21 @@ class InvoiceWhatsAppSenderService
         $pdfUrl = url('/api/invoice/' . $bookId . '/download');
 
         $orderType = DirectAppointment::where('book_id', $bookId)->latest('id')->value('order_type');
-        $evaluationLink = EvaluationLinkResolver::resolve($orderType);
+
+        // OrderTypeId, book_id, tech_user_name and district encrypted into the link itself (see
+        // EvaluationLinkResolver::buildWithEncryptedData()) — a failed fetch here (DY365 down, etc.) still
+        // falls back to a plain, working link rather than blocking the invoice send over it.
+        try {
+            $evaluationLinkData = $this->evaluationLinkDataFetcher->fetchForBookId($bookId);
+            $evaluationLink = EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('InvoiceWhatsAppSenderService: could not fetch evaluation link data, sending plain link', [
+                'book_id' => $bookId,
+                'error'   => $e->getMessage(),
+            ]);
+
+            $evaluationLink = EvaluationLinkResolver::resolve($orderType);
+        }
 
         // Same approved template as the existing cycle (it's the one real, Meta-approved template with a
         // Document header) — 2 body variables, the evaluation link once for each half of the bilingual text,

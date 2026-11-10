@@ -63,7 +63,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         private readonly bool $forceResend = false,
     ) {}
 
-    public function handle(DyService $dyService, TaqnyatSmsService $smsService, WhatsAppConfirmationService $whatsAppService, WhatsAppService $whatsAppPlainService): void
+    public function handle(DyService $dyService, TaqnyatSmsService $smsService, WhatsAppConfirmationService $whatsAppService, WhatsAppService $whatsAppPlainService, \App\Services\Evaluation\EvaluationLinkDataFetcher $evaluationLinkDataFetcher): void
     {
         $pdfUrl = url('/api/invoice/' . $this->bookId . '/download');
 
@@ -132,7 +132,21 @@ class SendInvoiceLinkJob implements ShouldQueue
         $shortUrl = url('/' . $shortLink->code);
 
         $orderType = DirectAppointment::where('book_id', $this->bookId)->latest('id')->value('order_type');
-        $evaluationLink = EvaluationLinkResolver::resolve($orderType);
+
+        // OrderTypeId, book_id, tech_user_name and district encrypted into the link itself (see
+        // EvaluationLinkResolver::buildWithEncryptedData()) — a failed fetch here (DY365 down, etc.) still
+        // falls back to a plain, working link rather than blocking the invoice send over it.
+        try {
+            $evaluationLinkData = $evaluationLinkDataFetcher->fetchForBookId($this->bookId);
+            $evaluationLink = EvaluationLinkResolver::buildWithEncryptedData($orderType, $evaluationLinkData);
+        } catch (\Throwable $e) {
+            Log::warning('SendInvoiceLinkJob: could not fetch evaluation link data, sending plain link', [
+                'book_id' => $this->bookId,
+                'error'   => $e->getMessage(),
+            ]);
+
+            $evaluationLink = EvaluationLinkResolver::resolve($orderType);
+        }
 
         $sentViaAny = false;
 
