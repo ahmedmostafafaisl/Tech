@@ -4265,6 +4265,8 @@ class NewDirectIntegrationController extends Controller
                 'required_amount' => 'not found',
                 'book_id' => 'not found',
                 'Worker' => 'not found',
+                'district' => 'not found',
+                'order_type' => 'not found',
                 'Status' => $response['Status'] ?? null,
                 'used_balance' => 'not found',
                 'CustomerId' => null,
@@ -4337,6 +4339,7 @@ class NewDirectIntegrationController extends Controller
             'Worker' => $data['Worker'] ?? null,
             'Status' => $data['Status'] ?? null,
             'CustomerId' => $customerId,
+            'district' => $data['District'] ?? 'not found',
             'used_balance' => abs((float) ($data['UsedBalance'] ?? 0)),
             'sales_lines' => $salesLines,
         ];
