@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\InvoiceSetting;
 use App\Services\DY365\DyService;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use Spatie\Browsershot\Browsershot;
 use Throwable;
@@ -107,64 +108,87 @@ class Invoice2Controller extends Controller
         return $this->generatePdf($id, 'stream');
     }
 
+    /**
+     * Rendering an invoice is expensive — a live DY365 call plus a full headless-Chrome launch
+     * (Browsershot) — and this endpoint used to redo all of it on every single hit, with no caching at all.
+     * That's exactly what Meta's own WhatsApp media fetcher hits right after an invoice is sent (the
+     * document header's URL, see InvoiceWhatsAppSenderService) — confirmed in production as "Media upload
+     * error (code 131053)": the combined DY365 + Browsershot time was exceeding whatever timeout Meta's
+     * media fetcher allows. Caching the finished PDF bytes means our own send and Meta's fetch moments later
+     * share the one render instead of each triggering their own.
+     */
+    private const PDF_CACHE_MINUTES = 15;
+
     private function generatePdf(string $id, string $mode = 'stream')
     {
         try {
-            $response = $this->dyService->getOrCreateInvoiceByBookId(['bookId' => $id]);
-            if (
-                !is_array($response) ||
-                empty($response['Status']) ||
-                empty($response['Data']) ||
-                !is_array($response['Data'])
-            ) {
-                return response()->view('Invoice.error', [
-                    'bookId' => $id,
-                ], 404);
+            // invoice_use_new_template (default: OFF — the original layout keeps rendering unless this is
+            // explicitly turned on) switches to pdf.invoice-v2, a redesigned layout — part of the cache key
+            // so a mid-TTL setting change doesn't serve the wrong cached template.
+            $view = \App\Models\Setting::isActive('invoice_use_new_template', false) ? 'pdf.invoice-v2' : 'pdf.invoice';
+            $cacheKey = "invoice_pdf:{$id}:{$view}";
+
+            $rendered = Cache::get($cacheKey);
+
+            if (! is_array($rendered) || ! isset($rendered['pdf'], $rendered['filename'])) {
+                $response = $this->dyService->getOrCreateInvoiceByBookId(['bookId' => $id]);
+                if (
+                    !is_array($response) ||
+                    empty($response['Status']) ||
+                    empty($response['Data']) ||
+                    !is_array($response['Data'])
+                ) {
+                    // Not cached — a "no invoice yet" result must stay retryable on the very next hit, not
+                    // get served back for the full TTL once the invoice genuinely exists.
+                    return response()->view('Invoice.error', [
+                        'bookId' => $id,
+                    ], 404);
+                }
+
+                $invoice = $this->mapInvoiceResponseToPdfData($response['Data']);
+                $labels  = InvoiceSetting::allAsArray();
+
+                $logoBase64 = base64_encode(file_get_contents(public_path('images/naqi-logo.png')));
+                $logoSrc    = 'data:image/png;base64,' . $logoBase64;
+
+                $qrRaw  = $response['Data']['QRCode'] ?? null;
+                $qrData = !empty($qrRaw) ? $qrRaw : $invoice['number'];
+                $qrCode = 'data:image/svg+xml;base64,' . base64_encode(
+                    QrCode::format('svg')->size(100)->generate($qrData)
+                );
+
+                $html = view($view, compact(
+                    'invoice',
+                    'qrCode',
+                    'labels',
+                    'logoSrc'
+                ))->render();
+
+                $browsershot = Browsershot::html($html)
+                    ->setChromePath(env('CHROME_PATH', '/usr/bin/google-chrome-stable'))
+                    ->noSandbox()
+                    ->addChromiumArguments([
+                        'disable-dev-shm-usage',
+                        'disable-gpu',
+                        'disable-setuid-sandbox',
+                        'disable-extensions',
+                    ])
+                    ->setEnvironmentOptions(['HOME' => '/tmp'])
+                    ->setOption('waitUntil', 'load')
+                    ->format('A4')
+                    ->margins(6, 6, 6, 6)
+                    ->showBackground();
+
+                $rendered = [
+                    'pdf'      => $browsershot->pdf(),
+                    'filename' => 'invoice-' . $invoice['number'] . '.pdf',
+                ];
+
+                Cache::put($cacheKey, $rendered, now()->addMinutes(self::PDF_CACHE_MINUTES));
             }
 
-            $invoice = $this->mapInvoiceResponseToPdfData($response['Data']);
-            $labels  = InvoiceSetting::allAsArray();
-
-            $logoBase64 = base64_encode(file_get_contents(public_path('images/naqi-logo.png')));
-            $logoSrc    = 'data:image/png;base64,' . $logoBase64;
-
-            $qrRaw  = $response['Data']['QRCode'] ?? null;
-            $qrData = !empty($qrRaw) ? $qrRaw : $invoice['number'];
-            $qrCode = 'data:image/svg+xml;base64,' . base64_encode(
-                QrCode::format('svg')->size(100)->generate($qrData)
-            );
-
-            // invoice_use_new_template (default: OFF — the original layout keeps rendering unless this is
-            // explicitly turned on) switches to pdf.invoice-v2, a redesigned layout. Both views are handed
-            // the exact same $invoice/$qrCode/$labels/$logoSrc data — mapInvoiceResponseToPdfData() needed
-            // no change for this.
-            $view = \App\Models\Setting::isActive('invoice_use_new_template', false) ? 'pdf.invoice-v2' : 'pdf.invoice';
-
-            $html = view($view, compact(
-                'invoice',
-                'qrCode',
-                'labels',
-                'logoSrc'
-            ))->render();
-
-            $browsershot = Browsershot::html($html)
-                ->setChromePath(env('CHROME_PATH', '/usr/bin/google-chrome-stable'))
-                ->noSandbox()
-                ->addChromiumArguments([
-                    'disable-dev-shm-usage',
-                    'disable-gpu',
-                    'disable-setuid-sandbox',
-                    'disable-extensions',
-                ])
-                ->setEnvironmentOptions(['HOME' => '/tmp'])
-                ->setOption('waitUntil', 'load')
-                ->format('A4')
-                ->margins(6, 6, 6, 6)
-                ->showBackground();
-
-            $pdf = $browsershot->pdf();
-
-            $filename = 'invoice-' . $invoice['number'] . '.pdf';
+            $pdf = $rendered['pdf'];
+            $filename = $rendered['filename'];
 
             return $mode === 'download'
                 ? response($pdf, 200)->withHeaders([
