@@ -47,7 +47,8 @@ class EvaluationLinkResolver
     }
 
     /**
-     * The same base page resolve() returns, with OrderTypeId, book_id, tech_user_name and district appended
+     * The same base page resolve() returns, with OrderTypeId, book_id, tech_user_name, district and
+     * complete_v2_calling appended
      * as a single encrypted query parameter — encrypted with this feature's OWN key (see encrypter()), not
      * the app's shared APP_KEY, so rotating or retiring one never affects the other, and nothing that reads
      * every other encrypted value in this app (sessions, other Crypt::encrypt() calls, queued job payloads,
@@ -62,10 +63,12 @@ class EvaluationLinkResolver
     public static function buildWithEncryptedData(?string $orderType, array $data): string
     {
         $payload = [
-            'OrderTypeId'    => $data['OrderTypeId'] ?? null,
-            'book_id'        => $data['book_id'] ?? null,
-            'tech_user_name' => $data['tech_user_name'] ?? null,
-            'district'       => $data['district'] ?? null,
+            'OrderTypeId'         => $data['OrderTypeId'] ?? null,
+            'book_id'             => $data['book_id'] ?? null,
+            'tech_user_name'      => $data['tech_user_name'] ?? null,
+            'district'            => $data['district'] ?? null,
+            'customer_phone'       => $data['customer_phone'] ?? null,
+            'complete_v2_calling' => $data['complete_v2_calling'] ?? now()->toDateTimeString(),
         ];
 
         $encrypted = self::encrypter()->encrypt(json_encode($payload));
