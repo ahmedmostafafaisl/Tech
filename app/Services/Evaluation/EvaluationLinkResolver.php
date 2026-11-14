@@ -47,18 +47,22 @@ class EvaluationLinkResolver
     }
 
     /**
-     * The same base page resolve() returns, with OrderTypeId, book_id, tech_user_name, district and
-     * complete_v2_calling appended
-     * as a single encrypted query parameter — encrypted with this feature's OWN key (see encrypter()), not
-     * the app's shared APP_KEY, so rotating or retiring one never affects the other, and nothing that reads
-     * every other encrypted value in this app (sessions, other Crypt::encrypt() calls, queued job payloads,
-     * etc. — all of which use APP_KEY) can also decode an evaluation link, or vice versa. The recipient
-     * can't read or tamper with the data from the link alone; only this same app, with the same key, can
-     * decode it back (see decodeData()).
+     * The same base page resolve() returns, with OrderTypeId, book_id, tech_user_name, district,
+     * customer_phone and complete_v2_calling appended as a single encrypted query parameter — encrypted
+     * with this feature's OWN key (see encrypter()), not the app's shared APP_KEY, so rotating or retiring
+     * one never affects the other, and nothing that reads every other encrypted value in this app
+     * (sessions, other Crypt::encrypt() calls, queued job payloads, etc. — all of which use APP_KEY) can
+     * also decode an evaluation link, or vice versa. The recipient can't read or tamper with the data from
+     * the link alone; only this same app, with the same key, can decode it back (see decodeData()).
      *
-     * $data keys: OrderTypeId, book_id, tech_user_name, district — pass whatever refSingleAppointmentByBookId
-     * already returned for this appointment; missing keys are simply encoded as null, nothing here requires
-     * all four to be present.
+     * $data keys: OrderTypeId, book_id, tech_user_name, district, customer_phone, complete_date_time — pass
+     * whatever EvaluationLinkDataFetcher::fetchForBookId() already returned for this appointment; missing
+     * keys are simply encoded as null (or now(), for the date), nothing here requires all six to be present.
+     * Note complete_date_time (the fetcher's key) vs complete_v2_calling (this payload's own field name) —
+     * they're deliberately different: the fetcher's key names what it does (extracts a date/time), while
+     * this field keeps the original DirectAppointment column's name for anyone already parsing a decrypted
+     * link. Renaming either one without updating the other here breaks this silently — the mismatched value
+     * is simply missing, so the null-coalesce falls through to now() with no error raised anywhere.
      */
     public static function buildWithEncryptedData(?string $orderType, array $data): string
     {
@@ -67,8 +71,8 @@ class EvaluationLinkResolver
             'book_id'             => $data['book_id'] ?? null,
             'tech_user_name'      => $data['tech_user_name'] ?? null,
             'district'            => $data['district'] ?? null,
-            'customer_phone'       => $data['customer_phone'] ?? null,
-            'complete_v2_calling' => $data['complete_v2_calling'] ?? now()->toDateTimeString(),
+            'customer_phone'      => $data['customer_phone'] ?? null,
+            'complete_v2_calling' => $data['complete_date_time'] ?? now()->toDateTimeString(),
         ];
 
         $encrypted = self::encrypter()->encrypt(json_encode($payload));
@@ -139,10 +143,11 @@ class EvaluationLinkResolver
      * reason to go through this).
      *
      * $evaluationData, when given, marks this row type='evaluation' and records the same plain fields the
-     * link itself was built from (OrderTypeId, book_id, tech_user_name, district) — distinguishing an
-     * evaluation short link from an invoice one on the same, already-existing short_links table, and giving
-     * the standalone evaluation send (which has no tracking table of its own) the same visibility
-     * invoice_whatsapp_messages.evaluation_data already provides for the invoice-alongside cycle.
+     * link itself was built from (OrderTypeId, book_id, tech_user_name, district, customer_phone,
+     * complete_date_time) — distinguishing an evaluation short link from an invoice one on the same,
+     * already-existing short_links table, and giving the standalone evaluation send (which has no tracking
+     * table of its own) the same visibility invoice_whatsapp_messages.evaluation_data already provides for
+     * the invoice-alongside cycle.
      */
     public static function shorten(string $fullUrl, ?string $bookId = null, ?string $phone = null, ?array $evaluationData = null): string
     {
