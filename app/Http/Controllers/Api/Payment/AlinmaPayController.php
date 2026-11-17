@@ -3,17 +3,24 @@
 namespace App\Http\Controllers\Api\Payment;
 
 use App\Http\Controllers\Controller;
+use App\Models\DirectAppointmentPayment;
 use App\Models\DyPaymentLink;
+use App\Services\Payment\AlinmaPayPaymentSyncService;
 use App\Services\Payment\AlinmaPayService;
 use App\Services\Payment\DyPaymentLinkTransitions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 /**
- * AlinmaPay Payment Gateway — mirrors ClickPayController's "dy" flow (dyHandleReturn / dyHandleCallback /
- * verifyAndCompleteDyClickPayLink) as closely as the two gateways' protocols allow. AlinmaPay has exactly
- * one callback mechanism (the receiptUrl, Section 7), unlike ClickPay's separate return-redirect and
- * server-callback — so there is one verify-and-complete entry point here, not two.
+ * AlinmaPay Payment Gateway. Two entirely separate flows live here, exactly as ClickPayController keeps its
+ * "dy" flow and its "new"/DirectAppointmentPayment flow side by side with no shared state between them:
+ *   - create() / receipt(): the DyPaymentLink flow (Section 4 Leg 1 + Section 7 receiptUrl), mirroring
+ *     ClickPayController's dyHandleReturn/dyHandleCallback/verifyAndCompleteDyClickPayLink.
+ *   - newHandleCallback(): the DirectAppointmentPayment ("send payment links") flow, mirroring
+ *     ClickPayController::newHandleCallback() + ClickPayPaymentSyncService. Initiation itself
+ *     (AlinmaPayService::createInvoiceNew()) is called directly from
+ *     NewDirectIntegrationController::sendPaymentLinks()'s own payment-type dispatch, the same way
+ *     ClickPayService::createInvoiceNew() already is — there is no separate "create" action for this flow.
  */
 class AlinmaPayController extends Controller
 {
@@ -171,5 +178,45 @@ class AlinmaPayController extends Controller
         }
 
         return ['outcome' => in_array($result, ['done', 'done_dy_notification_failed', 'already'], true) ? 'paid' : 'failed', 'payment' => $payment->fresh()];
+    }
+
+    /**
+     * The receiptUrl for the DirectAppointmentPayment ("send payment links") flow — the URL
+     * AlinmaPayService::createInvoiceNew() sets. Public, same reasoning as receipt() above. Mirrors
+     * ClickPayController::newHandleCallback(): looks the local row up by reference_id/payment_id, then
+     * delegates all status-interpreting/DB-updating logic to AlinmaPayPaymentSyncService::syncPayment() —
+     * which re-queries AlinmaPay directly rather than trusting this callback's own decrypted body, so a
+     * manual/polling sync endpoint can share the exact same logic later if one is added.
+     */
+    public function newHandleCallback(Request $request, AlinmaPayPaymentSyncService $syncService)
+    {
+        $referenceId = $request->input('reference_id');
+
+        Log::info('AlinmaPay callback received.', ['payload' => $request->all()]);
+
+        if (! $referenceId) {
+            return response()->json(['status' => false, 'message' => 'Missing reference_id'], 400);
+        }
+
+        $payment = DirectAppointmentPayment::where('reference_id', $referenceId)->first();
+
+        if (! $payment) {
+            Log::warning('AlinmaPay callback: local payment not found.', ['reference_id' => $referenceId]);
+
+            return response()->json(['status' => true, 'message' => 'Ignored — payment not found']);
+        }
+
+        try {
+            $result = $syncService->syncPayment($payment);
+        } catch (\Throwable $e) {
+            Log::error('AlinmaPay callback sync failed.', [
+                'reference_id' => $payment->reference_id,
+                'error'        => $e->getMessage(),
+            ]);
+
+            return response()->json(['status' => false, 'message' => 'Sync failed'], 500);
+        }
+
+        return response()->json(['status' => true, 'message' => 'Callback processed', 'data' => $result]);
     }
 }

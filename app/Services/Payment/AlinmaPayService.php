@@ -249,6 +249,91 @@ class AlinmaPayService
     }
 
     /**
+     * The DirectAppointmentPayment ("send payment links") flow — mirrors
+     * ClickPayService::createInvoiceNew() exactly: takes the already-created $payment row (reference_id
+     * already set by the caller) and amount/phone/sales_order_id, initiates the AlinmaPay purchase, and
+     * returns a redirect_url for NewDirectIntegrationController::sendPaymentLinks() to SMS to the customer
+     * (via TaqnyatSmsService::sendPaymentLink(), the same way every other payment type in that dispatch
+     * does) — no DyPaymentLink row here at all, unlike createPayment()/dyCreateInvoice()'s equivalent,
+     * since this flow's one local record is the $payment row itself.
+     *
+     * order.orderId is set to $payment->reference_id (not sales_order_id) — this is the value
+     * AlinmaPayPaymentSyncService later looks the row back up by, matching how ClickPay's own tran_ref/
+     * reference_id pairing on DirectAppointmentPayment works.
+     *
+     * @return array{success: bool, redirect_url?: string, payment_id?: string, message?: string, response?: mixed}
+     */
+    public function createInvoiceNew($payment, float $price, string $phone, $salesOrderId): array
+    {
+        $amountStr = number_format($price, 2, '.', '');
+        $currency  = 'SAR';
+        $orderId   = (string) $payment->reference_id;
+
+        $payload = [
+            'terminalId'  => $this->terminalId,
+            'password'    => $this->password,
+            'signature'   => $this->signRequest($orderId, $amountStr, $currency),
+            'paymentType' => '1',
+            'amount'      => $amountStr,
+            'currency'    => $currency,
+            'order'       => [
+                'orderId'     => $orderId,
+                'description' => "Appointment #{$salesOrderId}",
+            ],
+            'customer' => [
+                'customerEmail'            => 'customer@naqi.sa',
+                'mobileNumber'             => $phone,
+                'billingAddressStreet'     => 'N/A',
+                'billingAddressCity'       => 'Riyadh',
+                'billingAddressState'      => 'Riyadh',
+                'billingAddressPostalCode' => '00000',
+                'billingAddressCountry'    => 'SA',
+            ],
+            'additionalDetails' => [
+                'userData' => json_encode([
+                    'receiptUrl' => $this->publicRoute('new.alinmapay.callback', [
+                        'reference_id'   => $orderId,
+                        'sales_order_id' => $salesOrderId,
+                    ]),
+                ], JSON_UNESCAPED_SLASHES),
+            ],
+        ];
+
+        try {
+            $response = Http::post("{$this->baseUrl}/v2/payments/pay-request", $payload);
+            $json = $response->json();
+
+            $paymentId = $this->extractPaymentId($json);
+
+            if ($response->successful() && ! empty($json['transactionId']) && $paymentId !== null) {
+                $checkoutUrl = rtrim($this->baseUrl, '/') . '/direct.htm?paymentId=' . $paymentId;
+
+                return [
+                    'success'      => true,
+                    'redirect_url' => $checkoutUrl,
+                    'payment_id'   => $paymentId,
+                    'response'     => $json,
+                ];
+            }
+
+            Log::error('AlinmaPay createInvoiceNew: gateway did not accept the request', ['response' => $json]);
+
+            return [
+                'success'  => false,
+                'message'  => $json['responseDescription'] ?? 'Payment initiation failed',
+                'response' => $json,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('AlinmaPay createInvoiceNew error', ['error' => $e->getMessage()]);
+
+            return [
+                'success' => false,
+                'message' => 'Exception: ' . $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * Server-side verification independent of the receipt callback (Section 5.2, paymentType "10") —
      * queries AlinmaPay directly for a transaction's real, current status. Used the same way
      * ClickPayService::queryPayment() is: a plain query method, with all status-interpreting/DB-updating

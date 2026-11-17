@@ -40,6 +40,7 @@ use App\Services\DY365\DyService;
 use App\Services\Dynamics\DynamicsAttachmentPayloadService;
 use App\Services\Logs\TechnicianAppointmentLogService;
 use App\Services\Logs\TechnicianLogService;
+use App\Services\Payment\AlinmaPayService;
 use App\Services\Payment\ClickPayService;
 use App\Services\Payment\PaymentCompletionDispatcher;
 use App\Services\Payment\RequiredAmountCalculator;
@@ -2405,6 +2406,7 @@ class NewDirectIntegrationController extends Controller
                         'TABBY', 'TABI' => 'TABI',
                         'TAMARA' => 'TAMARA',
                         'E-COMMERCE', 'ECOMMERCE', 'E-COMMERCE ' => 'E-Commerce',
+                        'ALINMAPAY', 'ALINMA PAY', 'ALINMA_PAY' => 'ALINMAPAY',
                         'CASH' => 'CASH',
                         'POS' => 'POS',
                         'TRNS' => 'TRNS',
@@ -2429,7 +2431,7 @@ class NewDirectIntegrationController extends Controller
                     $forcePaid = in_array($paymentType, ['CASH', 'POS', 'TRNS'], true);
                     $status = ($isPaid || $forcePaid) ? 'paid' : 'pending';
 
-                    if ($status === 'paid' && in_array($paymentType, ['TABI', 'TAMARA', 'E-Commerce'], true) && $isPaid) {
+                    if ($status === 'paid' && in_array($paymentType, ['TABI', 'TAMARA', 'E-Commerce', 'ALINMAPAY'], true) && $isPaid) {
                         $checkDuplicate = $this->checkCompleteService->checkDuplicatePayment(
                             $sales_order_id,
                             $paymentType,
@@ -2488,6 +2490,11 @@ class NewDirectIntegrationController extends Controller
                             $payment->reference_id = $reference_id;
                             $payment->save();
                             $link = $clickpay['redirect_url'] ?? null;
+                        } elseif ($paymentType === 'ALINMAPAY') {
+                            $alinmapay = app(AlinmaPayService::class)->createInvoiceNew($payment, $price, $phone, $sales_order_id);
+                            $payment->payment_id = $alinmapay['payment_id'] ?? null;
+                            $payment->save();
+                            $link = $alinmapay['redirect_url'] ?? null;
                         }
 
                         if ($link) {
