@@ -257,9 +257,15 @@ class AlinmaPayService
      * does) — no DyPaymentLink row here at all, unlike createPayment()/dyCreateInvoice()'s equivalent,
      * since this flow's one local record is the $payment row itself.
      *
-     * order.orderId is set to $payment->reference_id (not sales_order_id) — this is the value
-     * AlinmaPayPaymentSyncService later looks the row back up by, matching how ClickPay's own tran_ref/
-     * reference_id pairing on DirectAppointmentPayment works.
+     * order.orderId is a freshly generated value every single call, deliberately never $payment->reference_id
+     * itself — confirmed in production that AlinmaPay rejects a pay-request outright ("A transaction is
+     * already in progress") when order.orderId repeats an earlier, still-open attempt's value, which
+     * reference_id would if reused across retries/resends of the same local row. Mirrors
+     * ClickPayService::createInvoiceNew()'s own 'cart_id' => 'ORDER-' . Str::uuid() — a fresh id per call,
+     * regardless of how many times this method runs for the same $payment. The generated value is saved to
+     * $payment->gateway_order_id so AlinmaPayPaymentSyncService::syncPayment() can query AlinmaPay with the
+     * exact same id its own records are keyed by; reference_id itself stays untouched, since the callback
+     * and the duplicate-payment check both key off that one, stable value instead.
      *
      * @return array{success: bool, redirect_url?: string, payment_id?: string, message?: string, response?: mixed}
      */
@@ -267,7 +273,10 @@ class AlinmaPayService
     {
         $amountStr = number_format($price, 2, '.', '');
         $currency  = 'SAR';
-        $orderId   = (string) $payment->reference_id;
+        $orderId   = (string) $payment->reference_id . '-' . Str::upper(Str::random(10));
+
+        $payment->gateway_order_id = $orderId;
+        $payment->save();
 
         $payload = [
             'terminalId'  => $this->terminalId,

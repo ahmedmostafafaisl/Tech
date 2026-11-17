@@ -19,6 +19,7 @@ class DirectAppointmentPayment extends Model
         'payment_type',
         'phone',
         'reference_id',
+        'gateway_order_id',
         'payment_id',
         'retrieval_reference_number',
         'verification_note',

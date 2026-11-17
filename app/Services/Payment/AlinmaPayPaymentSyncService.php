@@ -34,13 +34,15 @@ class AlinmaPayPaymentSyncService
     {
         $previousStatus = $payment->status;
 
-        // order.orderId was set to reference_id when this payment was created (see
-        // AlinmaPayService::createInvoiceNew()) — inquiry() needs that same value back, not payment_id
-        // (AlinmaPay's own transaction id), which plays no part in identifying the original order.
-        $orderId = $payment->reference_id;
+        // gateway_order_id is the freshly-generated value AlinmaPayService::createInvoiceNew() actually
+        // sent as order.orderId — the one AlinmaPay's own records are keyed by, deliberately never
+        // reference_id itself (see that method's own docblock for why: a repeated order.orderId gets
+        // "A transaction is already in progress" rejected). Falls back to reference_id only for a row
+        // created before this column existed, where the two did briefly mean the same thing.
+        $orderId = $payment->gateway_order_id ?: $payment->reference_id;
 
         if (! $orderId) {
-            throw new \RuntimeException('No AlinmaPay order reference (reference_id) on this payment record.');
+            throw new \RuntimeException('No AlinmaPay order reference (gateway_order_id/reference_id) on this payment record.');
         }
 
         $data = $this->alinmaPay->inquiry($orderId, $orderId, (float) $payment->price);

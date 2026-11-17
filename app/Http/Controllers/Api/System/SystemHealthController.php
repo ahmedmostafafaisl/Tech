@@ -55,6 +55,11 @@ class SystemHealthController extends Controller
             //telegram
             'telegram.bot_token'   => config('services.telegram.bot_token'),
             'telegram.chat_id'     => config('services.telegram.chat_id'),
+            //alinmapay
+            'alinmapay.base_url'       => config('services.alinmapay.base_url'),
+            'alinmapay.terminal_id'        => config('services.alinmapay.terminal_id'),
+            'alinmapay.merchant_key'    => config('services.alinmapay.merchant_key'),
+            'alinmapay.public_url'     => config('services.alinmapay.public_url'),
 
 
         ];
