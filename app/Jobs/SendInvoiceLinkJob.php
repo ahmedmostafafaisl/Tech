@@ -214,7 +214,7 @@ class SendInvoiceLinkJob implements ShouldQueue
         // sendViaWhatsAppTemplate()/sendViaWhatsAppFreeform() themselves) — specifically WITH the settings
         // snapshot, since "why did this send (or not send) the way it did" is almost always a question about
         // which of these was on at the time, not about the send call itself.
-        $this->logWhatsAppAttempt($useTemplate);
+        // $this->logWhatsAppAttempt($useTemplate);
 
         $sent = $useTemplate
             ? $this->sendViaWhatsAppTemplate($whatsAppService, $shortUrl, $evaluationLink, $pdfUrl, $shortLink)

@@ -14,10 +14,21 @@ use Illuminate\Support\Str;
  *
  * Always resolves to a real link — a null, empty, or unrecognized order_type falls back to the sales
  * evaluation page rather than skipping the evaluation link entirely.
+ *
+ * evaluation_unified_link_active (default off) switches every order_type to the one same page instead — see
+ * UNIFIED_PATH — without needing to touch any caller; resolve() is the single place that decision is made.
  */
 class EvaluationLinkResolver
 {
     private const DEFAULT_PATH = '/rate-sales/';
+
+    /**
+     * One page for every order_type, gated by evaluation_unified_link_active (default off, so this is
+     * opt-in — the four separate pages below keep being used until this is deliberately turned on). Just a
+     * path, same as DEFAULT_PATH and the others — composed with baseDomain() below exactly the same way, so
+     * this follows the same prod/develop switch as every other evaluation page, not a separate, fixed domain.
+     */
+    private const UNIFIED_PATH = '/customer-feedback/';
 
     /**
      * Prod (https://www.naqi.sa) by default — set EVALUATION_LINK_BASE_DOMAIN=https://naqi-ecommerce-develop.naqi.sa
@@ -33,6 +44,10 @@ class EvaluationLinkResolver
 
     public static function resolve(?string $orderType): string
     {
+        if (\App\Models\Setting::isActive('evaluation_unified_link_active', false)) {
+            return self::baseDomain() . self::UNIFIED_PATH;
+        }
+
         $orderType = trim((string) $orderType);
 
         $path = match (true) {
@@ -72,7 +87,7 @@ class EvaluationLinkResolver
             'tech_user_name'      => $data['tech_user_name'] ?? null,
             'district'            => $data['district'] ?? null,
             'customer_phone'      => $data['customer_phone'] ?? null,
-            'complete_v2_calling' => $data['complete_date_time'] ?? now()->toDateTimeString(),
+            'complete_v2_calling' => $data['c_date_time'] ?? now()->toDateString(),
         ];
 
         $encrypted = self::encrypter()->encrypt(json_encode($payload));

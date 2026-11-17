@@ -28,14 +28,21 @@ class InvoiceWhatsAppSenderService
     ) {}
 
     /**
-     * @return array{success: bool, message_id?: string, error?: string, response?: mixed}
+     * @return array{success: bool, message_id?: string, error?: string, response?: mixed, invoice_link?: string, order_type?: ?string}
      */
     public function send(string $bookId, string $phone): array
     {
+        // Computed before any of the validation/send logic below, and included on every return from here on
+        // (even the early failures) — both are cheap (a url() call, a single indexed lookup) and are
+        // properties of this invoice/appointment itself, not of whether the send actually succeeds, so a
+        // misconfigured template or a Meta rejection shouldn't mean this row is missing them either.
+        $pdfUrl = url('/api/invoice/' . $bookId . '/download');
+        $orderType = DirectAppointment::where('book_id', $bookId)->latest('id')->value('order_type');
+
         $templateName = Setting::where('key', 'invoice_whatsapp_template_name')->value('value');
 
         if (empty($templateName)) {
-            return ['success' => false, 'error' => 'invoice_whatsapp_template_name setting is not configured'];
+            return ['success' => false, 'error' => 'invoice_whatsapp_template_name setting is not configured', 'invoice_link' => $pdfUrl, 'order_type' => $orderType];
         }
 
         // A real, Meta-approved template name is never "true"/"false"/"1"/"0" — seen in production as the
@@ -44,12 +51,8 @@ class InvoiceWhatsAppSenderService
         // updated instead of this one). Catching it here fails fast with an actionable message, instead of
         // reaching Meta first and coming back with a cryptic OAuth error that doesn't name the real cause.
         if (in_array(strtolower((string) $templateName), ['true', 'false', '1', '0'], true)) {
-            return ['success' => false, 'error' => "invoice_whatsapp_template_name is misconfigured — its value is \"{$templateName}\", not a real template name"];
+            return ['success' => false, 'error' => "invoice_whatsapp_template_name is misconfigured — its value is \"{$templateName}\", not a real template name", 'invoice_link' => $pdfUrl, 'order_type' => $orderType];
         }
-
-        $pdfUrl = url('/api/invoice/' . $bookId . '/download');
-
-        $orderType = DirectAppointment::where('book_id', $bookId)->latest('id')->value('order_type');
 
         $evaluation = $this->buildEvaluationLinkForInvoice($bookId, $orderType);
 
@@ -71,7 +74,7 @@ class InvoiceWhatsAppSenderService
         try {
             $response = $this->whatsApp->sendTemplateMessage($phone, $templateName, $bodyParameters, [], 'ar', $documentHeader);
         } catch (\Throwable $e) {
-            return ['success' => false, 'error' => $e->getMessage(), 'evaluation' => $evaluation];
+            return ['success' => false, 'error' => $e->getMessage(), 'evaluation' => $evaluation, 'invoice_link' => $pdfUrl, 'order_type' => $orderType];
         }
 
         $responseBody = $response instanceof Response ? $response->json() : $response;
@@ -83,16 +86,16 @@ class InvoiceWhatsAppSenderService
             && ($responseBody['status'] ?? null) !== 'skipped';
 
         if (! $sent) {
-            return ['success' => false, 'error' => 'Not accepted by Meta', 'response' => $responseBody, 'evaluation' => $evaluation];
+            return ['success' => false, 'error' => 'Not accepted by Meta', 'response' => $responseBody, 'evaluation' => $evaluation, 'invoice_link' => $pdfUrl, 'order_type' => $orderType];
         }
 
         $messageId = $responseBody['messages'][0]['id'] ?? null;
 
         if (! $messageId) {
-            return ['success' => false, 'error' => 'Meta accepted the request but returned no message id', 'response' => $responseBody, 'evaluation' => $evaluation];
+            return ['success' => false, 'error' => 'Meta accepted the request but returned no message id', 'response' => $responseBody, 'evaluation' => $evaluation, 'invoice_link' => $pdfUrl, 'order_type' => $orderType];
         }
 
-        return ['success' => true, 'message_id' => $messageId, 'response' => $responseBody, 'evaluation' => $evaluation];
+        return ['success' => true, 'message_id' => $messageId, 'response' => $responseBody, 'evaluation' => $evaluation, 'invoice_link' => $pdfUrl, 'order_type' => $orderType];
     }
 
     /**

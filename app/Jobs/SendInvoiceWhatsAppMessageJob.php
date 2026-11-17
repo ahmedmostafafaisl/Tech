@@ -61,6 +61,12 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
         // run picking it up again mid-attempt — cleared in the finally below no matter how this method
         // exits (success, failure, or an early return), since every one of those is "this attempt is
         // finished", whether or not it was actually a retry at all.
+        // Computed here too, independently of InvoiceWhatsAppSenderService::send() (which is never reached
+        // if either of the two DY365 checks below fails first) — so a row stays complete, not missing these
+        // two fields, regardless of which failure mode actually stopped the send.
+        $invoiceLink = url('/api/invoice/' . $this->bookId . '/download');
+        $orderType = \App\Models\DirectAppointment::where('book_id', $this->bookId)->latest('id')->value('order_type');
+
         try {
             try {
                 $response = $dyService->getOrCreateInvoiceByBookId(['bookId' => $this->bookId]);
@@ -71,7 +77,7 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
                     'error'   => $e->getMessage(),
                 ]);
 
-                $message->update(['status' => 'failed', 'error' => 'DY365 call failed: ' . $e->getMessage()]);
+                $message->update(['status' => 'failed', 'error' => 'DY365 call failed: ' . $e->getMessage(), 'invoice_link' => $invoiceLink, 'order_type' => $orderType]);
 
                 return;
             }
@@ -88,7 +94,7 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
                     'response' => $response,
                 ]);
 
-                $message->update(['status' => 'failed', 'error' => 'Invoice not generated yet']);
+                $message->update(['status' => 'failed', 'error' => 'Invoice not generated yet', 'invoice_link' => $invoiceLink, 'order_type' => $orderType]);
 
                 return;
             }
@@ -107,6 +113,12 @@ class SendInvoiceWhatsAppMessageJob implements ShouldQueue
                 'evaluation_status' => $evaluation['status'] ?? null,
                 'evaluation_error'  => $evaluation['error'] ?? null,
             ] : [];
+
+            // Properties of this invoice/appointment itself, not of the evaluation link — present on every
+            // outcome InvoiceWhatsAppSenderService::send() can return, success or failure alike, since both
+            // are computed before any send attempt even happens.
+            $evaluationFields['invoice_link'] = $result['invoice_link'] ?? null;
+            $evaluationFields['order_type'] = $result['order_type'] ?? null;
 
             if (! empty($result['success'])) {
                 $message->update(array_merge($evaluationFields, [

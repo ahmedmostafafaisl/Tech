@@ -25,6 +25,8 @@ class InvoiceWhatsAppMessage extends Model
         'delivery_error',
         'error',
         'response',
+        'invoice_link',
+        'order_type',
         'evaluation_type',
         'evaluation_url',
         'evaluation_data',
