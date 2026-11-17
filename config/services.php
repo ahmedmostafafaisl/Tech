@@ -37,6 +37,21 @@ return [
         'profile_id'   => env('CLICKPAY_PROFILE_ID', 43354),
         'public_url'   => env('CLICKPAY_PUBLIC_URL', 'https://prod-api.naqi.sa'),
     ],
+
+    // ALINMAPAY_BASE_URL is the whole {domain-name}/{pg.context.path} prefix the spec's {{...}} placeholders
+    // stand for — e.g. https://pg.alinmapay.com.sa/SB_Transactions for sandbox (per the spec's own Section
+    // 13: SandBox https://pg.alinmapay.com.sa/SB_Transactions/v2/payments/pay-request, Production
+    // https://pg.alinmapay.com.sa/Transactions/v2/payments/pay-request — same host, "SB_Transactions" vs
+    // "Transactions"), so AlinmaPayService only ever appends the fixed path (v2/payments/pay-request,
+    // direct.htm, etc.) onto this one value. No trailing slash.
+    'alinmapay' => [
+        'base_url'    => env('ALINMAPAY_BASE_URL', 'https://pg.alinmapay.com.sa/SB_Transactions'),
+        'terminal_id' => env('ALINMAPAY_TERMINAL_ID'),
+        'password'    => env('ALINMAPAY_PASSWORD'),
+        // value or echo it back in any response.
+        'merchant_key' => env('ALINMAPAY_MERCHANT_KEY'),
+        'public_url'   => env('ALINMAPAY_PUBLIC_URL', env('CLICKPAY_PUBLIC_URL', 'https://prod-api.naqi.sa')),
+    ],
     'nearpay' => [
         'base_url'        => env('NEARPAY_BASE_URL'),     // e.g. https://sandbox-api.nearpay.io/v1/banks-sdk/
         // The Accounts API (terminal create/assign/unassign) is a different base path under the same host

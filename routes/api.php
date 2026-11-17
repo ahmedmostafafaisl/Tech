@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\Logs\TechnicianAppointmentLogController;
 use App\Http\Controllers\Api\Logs\TimeOutLogController;
 use App\Http\Controllers\Api\NewDirectIntegrationController;
 use App\Http\Controllers\Api\Notification\NotificationController;
+use App\Http\Controllers\Api\Payment\AlinmaPayController;
 use App\Http\Controllers\Api\Payment\ClickPayController;
 use App\Http\Controllers\Api\Payment\TabbyPaymentController;
 use App\Http\Controllers\Api\Payment\TabbyWebhookController;
@@ -506,6 +507,15 @@ Route::prefix('clickpay')->group(function () {
 //     Route::get('/return', [ClickPayController::class, 'handleReturn'])->name('clickpay.return');
 //     Route::get('/return', [ClickPayController::class, 'dyHandleReturn'])->name('dy.clickpay.return');
 // });
+
+// AlinmaPay payment routes (AlinmaPay API Specification v3.7) — mirrors the clickpay group above.
+// /create initiates a real charge, so it requires an authenticated session; /receipt stays public because
+// AlinmaPay POSTs to it directly, with no app auth token (Section 7's receiptUrl — AlinmaPay's one and
+// only callback mechanism, unlike ClickPay's separate return/callback pair).
+Route::prefix('alinmapay')->group(function () {
+    Route::middleware('auth:sanctum')->post('/create', [AlinmaPayController::class, 'create'])->name('alinmapay.create');
+    Route::post('/receipt', [AlinmaPayController::class, 'receipt'])->name('alinmapay.receipt');
+});
 // notifications routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/notifications', [TechController::class, 'index']);
