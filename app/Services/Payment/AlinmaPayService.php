@@ -352,6 +352,16 @@ class AlinmaPayService
      * queries AlinmaPay directly for a transaction's real, current status. Used the same way
      * ClickPayService::queryPayment() is: a plain query method, with all status-interpreting/DB-updating
      * logic left to the caller.
+     *
+     * $referenceId must be AlinmaPay's OWN original transaction id (what this method's own earlier version
+     * stored as $payment->payment_id — see createInvoiceNew()/extractPaymentId()) — confirmed in production
+     * as "Invalid tran message id" when this was instead given our own order.orderId (gateway_order_id):
+     * the spec's own field table for referenceId says plainly "Original transaction Id to be pass as
+     * reference Id" (Section 5.1, shared by Inquiry/Void/Capture/Refund alike), and its Inquiry sample
+     * request's own referenceId value ("2411016209313643227") is in exactly that same long-numeric shape as
+     * a transactionId/paymentId, not an orderId. $orderId (gateway_order_id/reference_id, whichever this
+     * transaction was actually created with) is still what the signature and order.orderId are built from —
+     * that part was already correct and stays unchanged.
      */
     public function inquiry(string $referenceId, string $orderId, float $amount): array
     {
@@ -367,6 +377,17 @@ class AlinmaPayService
             'amount'      => $amountStr,
             'currency'    => $currency,
             'order'       => ['orderId' => $orderId],
+            // Confirmed in production: every inquiry failed with "Invalid Country" without this — the
+            // spec marks these Conditional ("mandatory if AVS check is enabled" — Section 5.2), but this
+            // account evidently has that enabled, since the original createInvoiceNew() call (which already
+            // sends these same defaults) succeeds while this one, with no customer object at all, never did.
+            'customer' => [
+                'billingAddressStreet'     => 'N/A',
+                'billingAddressCity'       => 'Riyadh',
+                'billingAddressState'      => 'Riyadh',
+                'billingAddressPostalCode' => '00000',
+                'billingAddressCountry'    => 'SA',
+            ],
         ];
 
         $response = Http::post("{$this->baseUrl}/v2/payments/pay-request", $payload);

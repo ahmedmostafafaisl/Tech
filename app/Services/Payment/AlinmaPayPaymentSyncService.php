@@ -45,7 +45,14 @@ class AlinmaPayPaymentSyncService
             throw new \RuntimeException('No AlinmaPay order reference (gateway_order_id/reference_id) on this payment record.');
         }
 
-        $data = $this->alinmaPay->inquiry($orderId, $orderId, (float) $payment->price);
+        // inquiry()'s $referenceId must be AlinmaPay's OWN transaction id — payment_id, never $orderId
+        // (see inquiry()'s own docblock: passing our own order.orderId there got rejected in production
+        // with "Invalid tran message id"). $orderId is still correct for inquiry()'s second argument.
+        if (! $payment->payment_id) {
+            throw new \RuntimeException('No AlinmaPay payment_id on this payment record — cannot query a transaction AlinmaPay never confirmed.');
+        }
+
+        $data = $this->alinmaPay->inquiry($payment->payment_id, $orderId, (float) $payment->price);
 
         $responseCode = isset($data['responseCode']) ? (string) $data['responseCode'] : null;
 

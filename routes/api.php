@@ -819,6 +819,8 @@ Route::match(['get', 'post'], '/integration/clickpay/return', [ClickPayControlle
 // key-value data, so both are accepted here, same as ClickPayController's own newHandleReturn route (see
 // AlinmaPayService::createInvoiceNew()'s receiptUrl and AlinmaPayController::newHandleCallback()).
 Route::match(['get', 'post'], '/integration/alinmapay/callback', [AlinmaPayController::class, 'newHandleCallback'])->name('new.alinmapay.callback');
+Route::get('integration/alinmapay/payment-details', [AlinmaPayController::class, 'getPaymentDetails']);
+Route::get('integration/alinmapay/sync-payment-status', [AlinmaPayController::class, 'syncPaymentStatus']);
 
 Route::get('/invoice', function (Request $request) {
     return view('Invoice.invoice');

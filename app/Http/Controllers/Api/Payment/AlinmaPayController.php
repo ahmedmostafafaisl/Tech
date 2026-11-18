@@ -248,4 +248,128 @@ class AlinmaPayController extends Controller
             'taxAmount'       => $taxAmount,
         ]);
     }
+
+    /**
+     * GET /integration/alinmapay/payment-details?reference_id=...
+     * GET /integration/alinmapay/payment-details?payment_id=...
+     * Mirrors ClickPayController::getPaymentDetails() — the local DirectAppointmentPayment row alongside
+     * AlinmaPay's own, live transaction data (via inquiry()), not one or the other.
+     */
+    public function getPaymentDetails(Request $request)
+    {
+        $request->validate([
+            'payment_id'   => 'nullable|string|required_without:reference_id',
+            'reference_id' => 'nullable|string|required_without:payment_id',
+        ]);
+
+        if ($request->filled('reference_id')) {
+            $localPayment = DirectAppointmentPayment::where('reference_id', $request->input('reference_id'))->first();
+        } else {
+            $localPayment = DirectAppointmentPayment::where('payment_id', $request->input('payment_id'))
+                ->orWhere('gateway_order_id', $request->input('payment_id'))
+                ->first();
+        }
+
+        if (! $localPayment) {
+            $identifier = $request->input('reference_id') ?? $request->input('payment_id');
+
+            return response()->json([
+                'status'  => false,
+                'message' => "No local payment found for '{$identifier}'.",
+            ], 404);
+        }
+
+        // gateway_order_id/reference_id for inquiry()'s order.orderId and signature (whichever this
+        // transaction was actually created with — see AlinmaPayPaymentSyncService::syncPayment()'s own
+        // identical fallback); payment_id, separately, for inquiry()'s $referenceId — AlinmaPay's OWN
+        // transaction id, never our own order.orderId (see AlinmaPayService::inquiry()'s own docblock for
+        // why: confirmed in production as "Invalid tran message id" otherwise).
+        $orderId = $localPayment->gateway_order_id ?: $localPayment->reference_id;
+
+        if (! $orderId) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Local payment has no gateway_order_id or reference_id to query AlinmaPay with.',
+            ], 422);
+        }
+
+        if (! $localPayment->payment_id) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Local payment has no payment_id (AlinmaPay transaction id) to query AlinmaPay with.',
+            ], 422);
+        }
+
+        try {
+            $alinmapayData = $this->alinmaPay->inquiry($localPayment->payment_id, $orderId, (float) $localPayment->price);
+        } catch (\Throwable $e) {
+            Log::error('Failed to query AlinmaPay payment.', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to retrieve payment from AlinmaPay.',
+                'error'   => $e->getMessage(),
+            ], 502);
+        }
+
+        return response()->json([
+            'status' => true,
+            'data'   => [
+                'alinmapay_payment' => $alinmapayData,
+                'local_payment'     => $localPayment,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /integration/alinmapay/sync-payment-status?reference_id=...
+     * GET /integration/alinmapay/sync-payment-status?payment_id=...
+     * Mirrors ClickPayController::syncPaymentStatus() — same AlinmaPayPaymentSyncService::syncPayment() the
+     * receipt callback itself uses, so a manual check and the automatic one can never disagree on what
+     * "synced" means.
+     */
+    public function syncPaymentStatus(Request $request, AlinmaPayPaymentSyncService $syncService)
+    {
+        $request->validate([
+            'payment_id'   => 'nullable|string|required_without:reference_id',
+            'reference_id' => 'nullable|string|required_without:payment_id',
+        ]);
+
+        if ($request->filled('reference_id')) {
+            $payment = DirectAppointmentPayment::where('reference_id', $request->input('reference_id'))->first();
+        } else {
+            $payment = DirectAppointmentPayment::where('payment_id', $request->input('payment_id'))
+                ->orWhere('gateway_order_id', $request->input('payment_id'))
+                ->first();
+        }
+
+        if (! $payment) {
+            return response()->json(['status' => false, 'message' => 'No local payment found for the given identifier.'], 404);
+        }
+
+        try {
+            $result = $syncService->syncPayment($payment);
+        } catch (\Throwable $e) {
+            Log::error('Manual AlinmaPay payment sync failed.', [
+                'payment_id'   => $payment->payment_id,
+                'reference_id' => $payment->reference_id,
+                'error'        => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to sync payment status.',
+                'error'   => $e->getMessage(),
+            ], 502);
+        }
+
+        return response()->json([
+            'status' => true,
+            'data'   => [
+                'reference_id' => $payment->reference_id,
+                'payment_id'   => $payment->payment_id,
+                ...$result,
+            ],
+        ]);
+    }
 }
