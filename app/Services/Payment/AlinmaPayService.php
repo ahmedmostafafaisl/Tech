@@ -300,9 +300,14 @@ class AlinmaPayService
             ],
             'additionalDetails' => [
                 'userData' => json_encode([
+                    // $payment->reference_id, not $orderId — $orderId is the fresh value generated above
+                    // (see this method's own docblock), which never appears again once this one call ends;
+                    // reference_id is the stable value newHandleCallback() actually looks the row up by.
+                    // Confirmed in production: using $orderId here made every callback fail with "payment
+                    // not found", since the DB's own reference_id column never contained that exact string.
                     'receiptUrl' => $this->publicRoute('new.alinmapay.callback', [
-                        'reference_id'   => $orderId,
-                        'sales_order_id' => $salesOrderId,
+                        'reference_id' => $payment->reference_id,
+                        'book_id'      => $payment->book_id,
                     ]),
                 ], JSON_UNESCAPED_SLASHES),
             ],

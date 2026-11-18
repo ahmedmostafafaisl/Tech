@@ -814,9 +814,11 @@ Route::post('/integration/clickpay/success/reference_id={reference_id}/sales_ord
 Route::post('/integration/clickpay/callback', [ClickPayController::class, 'newHandleCallback'])->name('new.clickpay.callback');
 Route::match(['get', 'post'], '/integration/clickpay/return', [ClickPayController::class, 'newHandleReturn'])->name('new.clickpay.return');
 
-// AlinmaPay — DirectAppointmentPayment ("send payment links") flow. Public: AlinmaPay POSTs here directly
-// with no app auth token (Section 7's receiptUrl, see AlinmaPayService::createInvoiceNew()).
-Route::post('/integration/alinmapay/callback', [AlinmaPayController::class, 'newHandleCallback'])->name('new.alinmapay.callback');
+// AlinmaPay — DirectAppointmentPayment ("send payment links") flow. Public: this is where the customer's
+// own browser lands after the hosted page (GET) — AlinmaPay's spec also describes this as a server POST of
+// key-value data, so both are accepted here, same as ClickPayController's own newHandleReturn route (see
+// AlinmaPayService::createInvoiceNew()'s receiptUrl and AlinmaPayController::newHandleCallback()).
+Route::match(['get', 'post'], '/integration/alinmapay/callback', [AlinmaPayController::class, 'newHandleCallback'])->name('new.alinmapay.callback');
 
 Route::get('/invoice', function (Request $request) {
     return view('Invoice.invoice');

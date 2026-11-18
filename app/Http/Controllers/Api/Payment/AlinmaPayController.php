@@ -188,9 +188,16 @@ class AlinmaPayController extends Controller
      * which re-queries AlinmaPay directly rather than trusting this callback's own decrypted body, so a
      * manual/polling sync endpoint can share the exact same logic later if one is added.
      */
+    /**
+     * The customer's browser lands here after completing (or abandoning) payment on AlinmaPay's hosted
+     * page — not a pure server-to-server webhook — so, on every outcome, this renders the same
+     * Payment.result blade view ClickPayController::newHandleReturn() already uses for its own browser
+     * return, rather than JSON a person would otherwise be left looking at raw.
+     */
     public function newHandleCallback(Request $request, AlinmaPayPaymentSyncService $syncService)
     {
         $referenceId = $request->input('reference_id');
+        $bookId      = $request->input('book_id');
 
         Log::info('AlinmaPay callback received.', ['payload' => $request->all()]);
 
@@ -201,22 +208,44 @@ class AlinmaPayController extends Controller
         $payment = DirectAppointmentPayment::where('reference_id', $referenceId)->first();
 
         if (! $payment) {
-            Log::warning('AlinmaPay callback: local payment not found.', ['reference_id' => $referenceId]);
+            Log::warning('AlinmaPay callback: local payment not found.', [
+                'reference_id' => $referenceId,
+                'book_id'      => $bookId,
+            ]);
 
-            return response()->json(['status' => true, 'message' => 'Ignored — payment not found']);
+            return view('Payment.result', [
+                'status'          => 'failed',
+                'payment_type'    => 'alinmapay',
+                'message'         => 'Payment not found',
+                'payment'         => null,
+                'priceWithoutTax' => 0,
+                'taxAmount'       => 0,
+            ]);
         }
 
         try {
-            $result = $syncService->syncPayment($payment);
+            $syncService->syncPayment($payment);
         } catch (\Throwable $e) {
             Log::error('AlinmaPay callback sync failed.', [
                 'reference_id' => $payment->reference_id,
+                'book_id'      => $bookId,
                 'error'        => $e->getMessage(),
             ]);
-
-            return response()->json(['status' => false, 'message' => 'Sync failed'], 500);
+            // $payment is left exactly as syncPayment() found it — no attempt here to guess a status.
         }
 
-        return response()->json(['status' => true, 'message' => 'Callback processed', 'data' => $result]);
+        $payment->refresh();
+
+        $totalAmount     = (float) ($payment->price ?? 0);
+        $priceWithoutTax = round($totalAmount / 1.15, 2);
+        $taxAmount       = round($totalAmount - $priceWithoutTax, 2);
+
+        return view('Payment.result', [
+            'status'          => $payment->status,
+            'payment_type'    => 'alinmapay',
+            'payment'         => $payment,
+            'priceWithoutTax' => $priceWithoutTax,
+            'taxAmount'       => $taxAmount,
+        ]);
     }
 }

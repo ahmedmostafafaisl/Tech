@@ -3,6 +3,7 @@ $messages = [
     'tabby' => 'Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order.',
     'tamara' => 'Sorry, Tamara is unable to approve this purchase. Please use an alternative payment method for your order.',
     'clickpay' => 'Sorry, Click Pay is unable to approve this purchase. Please use an alternative payment method for your order.',
+    'alinmapay' => 'Sorry, AlinmaPay is unable to approve this purchase. Please use an alternative payment method for your order.',
 ];
 @endphp
 @extends('layouts.app')
