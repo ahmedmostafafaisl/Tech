@@ -26,7 +26,7 @@ class AlinmaPayService
     protected string $password;
     protected string $merchantKey;
     protected string $publicUrl;
-
+    protected string $merchantIp;
     public function __construct()
     {
         $this->baseUrl     = rtrim((string) config('services.alinmapay.base_url', ''), '/');
@@ -34,6 +34,8 @@ class AlinmaPayService
         $this->password    = (string) config('services.alinmapay.password', '');
         $this->merchantKey = (string) config('services.alinmapay.merchant_key', '');
         $this->publicUrl   = rtrim((string) config('services.alinmapay.public_url', config('app.url')), '/');
+        $this->merchantIp = Http::timeout(5)->get('https://api.ipify.org')->body();
+        $this->merchantIp = trim($this->merchantIp);
     }
 
     /**
@@ -203,7 +205,6 @@ class AlinmaPayService
                 ];
             }
 
-            Log::error('AlinmaPay createPayment: gateway did not accept the request', ['response' => $json]);
 
             return [
                 'success'  => false,
@@ -211,7 +212,6 @@ class AlinmaPayService
                 'response' => $json,
             ];
         } catch (\Throwable $e) {
-            Log::error('AlinmaPay createPayment error', ['error' => $e->getMessage()]);
 
             return [
                 'success' => false,
@@ -300,11 +300,6 @@ class AlinmaPayService
             ],
             'additionalDetails' => [
                 'userData' => json_encode([
-                    // $payment->reference_id, not $orderId — $orderId is the fresh value generated above
-                    // (see this method's own docblock), which never appears again once this one call ends;
-                    // reference_id is the stable value newHandleCallback() actually looks the row up by.
-                    // Confirmed in production: using $orderId here made every callback fail with "payment
-                    // not found", since the DB's own reference_id column never contained that exact string.
                     'receiptUrl' => $this->publicRoute('new.alinmapay.callback', [
                         'reference_id' => $payment->reference_id,
                         'book_id'      => $payment->book_id,
@@ -330,15 +325,12 @@ class AlinmaPayService
                 ];
             }
 
-            Log::error('AlinmaPay createInvoiceNew: gateway did not accept the request', ['response' => $json]);
-
             return [
                 'success'  => false,
                 'message'  => $json['responseDescription'] ?? 'Payment initiation failed',
                 'response' => $json,
             ];
         } catch (\Throwable $e) {
-            Log::error('AlinmaPay createInvoiceNew error', ['error' => $e->getMessage()]);
 
             return [
                 'success' => false,
@@ -367,7 +359,6 @@ class AlinmaPayService
     {
         $amountStr = number_format($amount, 2, '.', '');
         $currency  = 'SAR';
-
         $payload = [
             'referenceId' => $referenceId,
             'terminalId'  => $this->terminalId,
@@ -377,10 +368,7 @@ class AlinmaPayService
             'amount'      => $amountStr,
             'currency'    => $currency,
             'order'       => ['orderId' => $orderId],
-            // Confirmed in production: every inquiry failed with "Invalid Country" without this — the
-            // spec marks these Conditional ("mandatory if AVS check is enabled" — Section 5.2), but this
-            // account evidently has that enabled, since the original createInvoiceNew() call (which already
-            // sends these same defaults) succeeds while this one, with no customer object at all, never did.
+            'merchantIp' => $this->merchantIp,
             'customer' => [
                 'billingAddressStreet'     => 'N/A',
                 'billingAddressCity'       => 'Riyadh',
@@ -388,8 +376,8 @@ class AlinmaPayService
                 'billingAddressPostalCode' => '00000',
                 'billingAddressCountry'    => 'SA',
             ],
-        ];
 
+        ];
         $response = Http::post("{$this->baseUrl}/v2/payments/pay-request", $payload);
 
         if (! $response->successful()) {
