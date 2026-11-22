@@ -68,6 +68,14 @@ class SendPaymentLinksRequest extends FormRequest
             'customer_id'                  => 'nullable|string',
             'order_type'                   => 'required|string',
             'tech_id'                      => 'nullable|integer',
+            // discount has no upper bound here — it can legitimately equal the appointment's entire
+            // required_amount. The empty-payments gate right below (withValidator()'s own ── 0)) only
+            // checks this value is present at all; whether a full discount is actually legitimate
+            // (FullDiscountGuard: required_amount covered entirely by discount AND DY365's own PaidAmount
+            // or used_balance > 0) needs live DY365 data this request never sees, so that part stays in
+            // NewDirectIntegrationController::sendPaymentLinks() itself, after this validation passes.
+            // The $500 delivery-fee threshold (fes-transportation) is also checked there, against the
+            // goods subtotal AFTER this discount, not DY365's raw TotalAmountSum.
             'discount'                     => 'nullable|numeric|min:0',
             'total_price'                  => 'required|numeric|min:0',
 
@@ -85,7 +93,12 @@ class SendPaymentLinksRequest extends FormRequest
             'items.*.serials'              => 'nullable|array',
             'items.*.serials.*'            => 'required|string',
 
-            'payments'                     => 'required|array|min:1',
+            // Not required|min:1 any more — an empty payments array is exactly what a legitimate full
+            // discount (discount covers required_amount entirely, no real payment anywhere) looks like.
+            // 'array' is still enforced; whether at least one payment is actually needed is decided in
+            // withValidator() below, where discount is available to check against — a request with no
+            // discount and no payments still gets rejected there, just not by this rule alone.
+            'payments'                     => 'nullable|array',
             'payments.*.price'             => 'required|numeric|min:0.01',
             'payments.*.payment_type'      => 'required|string|in:TABI,TAMARA,E-Commerce,ALINMAPAY,CASH,POS,TRNS,NEARPAY',
             'payments.*.phone'             => 'required|string|min:8|max:20',
@@ -98,6 +111,24 @@ class SendPaymentLinksRequest extends FormRequest
     {
         $validator->after(function ($validator) {
             $bookId = $this->input('book_id');
+
+            // ── 0) At least one payment, UNLESS a discount is actually being applied ──────
+            // 'payments' itself no longer carries required|min:1 (see rules()) — an empty array there is
+            // exactly what a legitimate full discount looks like, and whether it's actually legitimate
+            // (FullDiscountGuard: required_amount covered entirely by discount AND DY365's own PaidAmount
+            // or used_balance > 0) needs live DY365 data this request never sees, so that part is checked in
+            // NewDirectIntegrationController::sendPaymentLinks() itself, not here. This only blocks the one
+            // case fully within this request's own view: no discount AND no payments — nothing paying for
+            // the appointment at all.
+            $discountValue = (float) $this->input('discount', 0);
+            $paymentsCount = count($this->input('payments', []));
+
+            if ($discountValue <= 0 && $paymentsCount === 0) {
+                $validator->errors()->add(
+                    'payments',
+                    'At least one payment is required.'
+                );
+            }
 
             // ── 1) Serial count check (existing logic) ──────────────────────────
             foreach ($this->input('items', []) as $index => $item) {
@@ -278,9 +309,9 @@ class SendPaymentLinksRequest extends FormRequest
             'items.*.orderTypeRecId.required'  => 'orderTypeRecId is required for each item.',
             'items.*.WarrantyStatus.in'        => 'WarrantyStatus must be Yes, No, or None.',
 
-            'payments.required'                => 'At least one payment is required.',
+            // 'payments.required'/'payments.min' no longer exist as rules (see rules() and withValidator()'s
+            // new ── 0) check) — an empty payments array is only an error there, conditionally, not here.
             'payments.array'                   => 'Payments must be an array.',
-            'payments.min'                     => 'At least one payment is required.',
             'payments.*.price.required'        => 'Payment price is required.',
             'payments.*.price.min'             => 'Payment price must be greater than 0.',
             'payments.*.payment_type.required' => 'Payment type is required.',

@@ -2142,12 +2142,15 @@ class NewDirectIntegrationController extends Controller
             //   (only if still > 0), never negative.
             // Single source of truth: RequiredAmountCalculator — do not
             // duplicate this formula elsewhere; reuse this same class.
-            if (Setting::isActive('new_required_amount_calculation_active')) {
-                $paidAmount = (float) ($singleAppointment['PaidAmount'] ?? 0);
-                $usedBalance = abs((float) ($singleAppointment['used_balance'] ?? 0));
+            // Read regardless of new_required_amount_calculation_active below — the full-discount
+            // guard further down needs these two values independently of whether that flag changes
+            // how $required_amount itself is derived.
+            $paidAmountValue = (float) ($singleAppointment['PaidAmount'] ?? 0);
+            $usedBalanceValue = abs((float) ($singleAppointment['used_balance'] ?? 0));
 
+            if (Setting::isActive('new_required_amount_calculation_active')) {
                 $required_amount = app(RequiredAmountCalculator::class)
-                    ->calculate($required_amount, $paidAmount, $usedBalance);
+                    ->calculate($required_amount, $paidAmountValue, $usedBalanceValue);
             }
 
             // ✅ order_type تركيب/منتجات — goods subtotal < 500 vs >= 500
@@ -2166,8 +2169,16 @@ class NewDirectIntegrationController extends Controller
                 // the delivery-fee line itself (and the tech-visit price). Comparing the raw
                 // TotalAmountSum made goods of 465–499 impossible to satisfy: without the fee
                 // it was "missing", with the fee (total ≥ 500) it was "unexpected".
-                $adjustedTotalAmountSum = \App\Services\Payment\DeliveryFeeThreshold::subtotal($totalAmountSum, $salesLinesForCheck);
-                $deliveryFeeViolation   = \App\Services\Payment\DeliveryFeeThreshold::violation($totalAmountSum, $salesLinesForCheck);
+                //
+                // total_sum_validation is checked against the goods subtotal AFTER discount, not the
+                // raw DY365 TotalAmountSum — a discount that drops the customer's actual, effective
+                // spend below the $500 threshold means a delivery fee (fes-transportation) is now
+                // required, the same as if the goods had genuinely been priced that low from the start.
+                // discount_value only ever reduces this (never below 0), so this cannot turn a
+                // genuinely-required fee into an unexpected one — only the other direction.
+                $totalAmountSumAfterDiscount = max(0, $totalAmountSum - $discount_value);
+                $adjustedTotalAmountSum = \App\Services\Payment\DeliveryFeeThreshold::subtotal($totalAmountSumAfterDiscount, $salesLinesForCheck);
+                $deliveryFeeViolation   = \App\Services\Payment\DeliveryFeeThreshold::violation($totalAmountSumAfterDiscount, $salesLinesForCheck);
 
                 if ($deliveryFeeViolation === \App\Services\Payment\DeliveryFeeThreshold::MISSING) {
                     $logService->validationFailed(
@@ -2266,7 +2277,7 @@ class NewDirectIntegrationController extends Controller
                 ], 400);
             }
 
-            return DB::transaction(function () use ($sales_order_id, $book_id, $tech_id, $discount_value, $paymentsInput, $required_amount, $lines, &$results, $request, $logService, $items, $InstallmentStatus) {
+            return DB::transaction(function () use ($sales_order_id, $book_id, $tech_id, $discount_value, $paymentsInput, $required_amount, $lines, &$results, $request, $logService, $items, $InstallmentStatus, $paidAmountValue, $usedBalanceValue) {
                 $directAppointment = DirectAppointment::firstOrCreate(
                     ['book_id' => $book_id],
                     [
@@ -2313,6 +2324,37 @@ class NewDirectIntegrationController extends Controller
 
                 $new_payments_total = (float) collect($paymentsInput)->sum('price');
                 $calculated_total = $final_discount + $paid_total + $new_payments_total;
+
+                // See FullDiscountGuard — a discount covering the entire required_amount with no real
+                // payment anywhere is only allowed when DY365 itself shows some real payment activity
+                // (PaidAmount) or a credit balance being applied (used_balance); otherwise this is a
+                // 100%-off discount with nothing behind it, rejected outright rather than silently zeroing
+                // the appointment's balance.
+                if (\App\Services\Payment\FullDiscountGuard::violates($required_amount, $final_discount, $paid_total, $new_payments_total, $paidAmountValue, $usedBalanceValue)) {
+                    $responseBody = [
+                        'status' => false,
+                        'message' => 'A discount covering the full required amount with no payment is only allowed when PaidAmount or used_balance is greater than zero.',
+                        'details' => [
+                            'required_amount' => $required_amount,
+                            'discount' => $final_discount,
+                            'paid_amount' => $paidAmountValue,
+                            'used_balance' => $usedBalanceValue,
+                        ],
+                    ];
+
+                    $logService->validationFailed(
+                        techId: $tech_id,
+                        action: 'send_payment_links',
+                        bookId: $book_id,
+                        salesOrderId: $sales_order_id,
+                        message: 'Full discount with no real payment rejected — PaidAmount and used_balance are both zero.',
+                        requestPayload: $request->all(),
+                        responsePayload: $responseBody,
+                        userId: auth()->id(),
+                    );
+
+                    return response()->json($responseBody, 400);
+                }
 
                 if (abs($calculated_total - $required_amount) > 0.01) {
                     $directAppointment->update([
@@ -2673,7 +2715,6 @@ class NewDirectIntegrationController extends Controller
             }
 
             if ($payment) {
-
                 $paid_total = (float) ($payment->paid_total ?? 0);
                 $db_discount = (float) ($payment->discount ?? 0);
 
