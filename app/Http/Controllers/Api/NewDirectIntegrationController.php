@@ -2694,8 +2694,16 @@ class NewDirectIntegrationController extends Controller
                         $q->where('status', 'paid');
                     }])
                     ->where('book_id', $book_id)
-                    ->whereHas('payments', function ($q) {
-                        $q->where('status', 'paid');
+                    // A real paid payment OR the appointment's own discount column already covering the
+                    // (live, just-computed above) required_amount in full — a 100% discount with zero real
+                    // payment never has a 'paid' row at all (see FullDiscountGuard — this is exactly the
+                    // legitimate case it allows through at request time), so without this orWhere the query
+                    // itself would never find the row, and the request falls through to 'not_found' before
+                    // the status === 'paid' logic further below ever gets a chance to run.
+                    ->where(function ($q) use ($required_amount) {
+                        $q->whereHas('payments', function ($q2) {
+                            $q2->where('status', 'paid');
+                        })->orWhere('discount', '>=', $required_amount - 0.01);
                     })
                     ->orderByDesc('id')
                     ->first();
