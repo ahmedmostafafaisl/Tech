@@ -39,6 +39,16 @@ class PaymentCompletionDispatcher
             $required = app(\App\Services\Payment\RequiredAmountCalculator::class)
                 ->calculate($required, $paidAmount, $usedBalance);
         }
+        // The appointment's own local discount — a 100%-discount appointment (discount covers
+        // required_amount entirely, see FullDiscountGuard) has zero real 'paid' payments by design, the
+        // same way a genuinely required_amount===0 appointment does — yet $required alone never reflects
+        // that, since discount is a local application concept DY365 itself doesn't factor into
+        // required_amount/PaidAmount/UsedBalance. Used only for the "is anything still genuinely owed"
+        // decisions below (the lock-marker reset and the no_paid_payments/sales_lines_empty fallbacks) —
+        // $required itself is left untouched everywhere else (e.g. the DY365 request body below still
+        // reports the real, un-discounted required_amount; Discount is reported to DY365 separately).
+        $remainingAfterDiscount = max(0, $required - (float) ($appointment->discount ?? 0));
+
 
         $serialPayload = $this->buildSalesLinesSerial($appointmentData);
 
@@ -98,7 +108,7 @@ class PaymentCompletionDispatcher
 
         // ✅ لو required=0 وعايز تعيد الإرسال: reset markers تلقائيًا
         // (ده يحقق طلبك "زي completeAppointment")
-        if (abs($required) < 0.01) {
+        if (abs($remainingAfterDiscount) < 0.01) {
             if (
                 str_contains($marker, 'running:')
                 || str_contains($marker, 'blocked:')
@@ -152,7 +162,7 @@ class PaymentCompletionDispatcher
             ->values();
 
         if ($payments->isEmpty()) {
-            if (abs($required) < 0.01) {
+            if (abs($remainingAfterDiscount) < 0.01) {
                 // ✅ required=0 => allow with dummy salesLines
                 $salesLines = [
                     [
@@ -226,7 +236,7 @@ class PaymentCompletionDispatcher
 
         // ✅ لو السبب sales_lines_empty ومع required=0: اعمل fallback lines وحاول تاني
         if (!(($check['ok'] ?? false) === true)) {
-            if (abs($required) < 0.01 && ($check['reason'] ?? null) === 'sales_lines_empty') {
+            if (abs($remainingAfterDiscount) < 0.01 && ($check['reason'] ?? null) === 'sales_lines_empty') {
                 $body['_contract']['salesLines'] = [
                     [
                         'TotalAmount'      => 0.0,
@@ -590,6 +600,10 @@ class PaymentCompletionDispatcher
                 ->calculate($required, $paidAmount, $usedBalance);
         }
 
+        // Same reasoning as dispatch()'s own $remainingAfterDiscount — kept in sync for the same reason
+        // the rest of this method already is.
+        $remainingAfterDiscount = max(0, $required - (float) ($appointment->discount ?? 0));
+
         $serialPayload   = $this->buildSalesLinesSerial($appointmentData);
 
         // ✅ Read directly from the appointment record, same as dispatch().
@@ -633,7 +647,7 @@ class PaymentCompletionDispatcher
         // ── Check lock marker ─────────────────────────────────────────────
         $marker = (string) ($appointment->complete_v2_calling ?? '');
 
-        if (abs($required) < 0.01) {
+        if (abs($remainingAfterDiscount) < 0.01) {
             if (
                 str_contains($marker, 'running:')
                 || str_contains($marker, 'blocked:')
@@ -678,7 +692,7 @@ class PaymentCompletionDispatcher
             ->values();
 
         if ($payments->isEmpty()) {
-            if (abs($required) < 0.01) {
+            if (abs($remainingAfterDiscount) < 0.01) {
                 $salesLines = [[
                     'TotalAmount'      => 0.0,
                     'PaymentReference' => null,
@@ -720,7 +734,7 @@ class PaymentCompletionDispatcher
         $check = $this->checkCompleteService->checkPayments($appointment->book_id, $body);
 
         if (($check['ok'] ?? false) !== true) {
-            if (abs($required) < 0.01 && ($check['reason'] ?? null) === 'sales_lines_empty') {
+            if (abs($remainingAfterDiscount) < 0.01 && ($check['reason'] ?? null) === 'sales_lines_empty') {
                 $body['_contract']['salesLines'] = [[
                     'TotalAmount'      => 0.0,
                     'PaymentReference' => null,

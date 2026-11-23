@@ -202,7 +202,14 @@ class AlinmaPayController extends Controller
         Log::info('AlinmaPay callback received.', ['payload' => $request->all()]);
 
         if (! $referenceId) {
-            return response()->json(['status' => false, 'message' => 'Missing reference_id'], 400);
+            // A 400 here was being read by the webhook-registration UI (ChargeAutomation/AlinmaPay's own
+            // setup flow sends a validation/ping request with no reference_id at all, just to confirm this
+            // URL is reachable) as "invalid URL" — the URL itself is perfectly valid, there's simply
+            // nothing to act on for this particular request, exactly like the "payment not found" case
+            // right below already treats as a benign 200, not an error.
+            Log::info('AlinmaPay callback: no reference_id — treating as a validation/ping request.');
+
+            return response()->json(['status' => true, 'message' => 'OK']);
         }
 
         $payment = DirectAppointmentPayment::where('reference_id', $referenceId)->first();
