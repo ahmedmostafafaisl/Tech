@@ -2331,29 +2331,16 @@ class NewDirectIntegrationController extends Controller
                 // 100%-off discount with nothing behind it, rejected outright rather than silently zeroing
                 // the appointment's balance.
                 if (\App\Services\Payment\FullDiscountGuard::violates($required_amount, $final_discount, $paid_total, $new_payments_total, $paidAmountValue, $usedBalanceValue)) {
-                    $responseBody = [
-                        'status' => false,
-                        'message' => 'A discount covering the full required amount with no payment is only allowed when PaidAmount or used_balance is greater than zero.',
-                        'details' => [
-                            'required_amount' => $required_amount,
-                            'discount' => $final_discount,
-                            'paid_amount' => $paidAmountValue,
-                            'used_balance' => $usedBalanceValue,
-                        ],
-                    ];
-
-                    $logService->validationFailed(
-                        techId: $tech_id,
-                        action: 'send_payment_links',
-                        bookId: $book_id,
-                        salesOrderId: $sales_order_id,
-                        message: 'Full discount with no real payment rejected — PaidAmount and used_balance are both zero.',
-                        requestPayload: $request->all(),
-                        responsePayload: $responseBody,
-                        userId: auth()->id(),
-                    );
-
-                    return response()->json($responseBody, 400);
+                    // Thrown, not returned — a plain return from inside this closure would still let
+                    // DB::transaction() commit the firstOrCreate()/discount/required_amount writes already
+                    // made above, since it only rolls back on a thrown exception. See
+                    // FullDiscountGuardViolationException's own docblock for the exact bug this was.
+                    throw new \App\Exceptions\FullDiscountGuardViolationException([
+                        'required_amount' => $required_amount,
+                        'discount' => $final_discount,
+                        'paid_amount' => $paidAmountValue,
+                        'used_balance' => $usedBalanceValue,
+                    ]);
                 }
 
                 if (abs($calculated_total - $required_amount) > 0.01) {
@@ -2616,6 +2603,29 @@ class NewDirectIntegrationController extends Controller
             });
         } catch (HttpResponseException $e) {
             throw $e;
+        } catch (\App\Exceptions\FullDiscountGuardViolationException $e) {
+            // Caught here, outside DB::transaction() — by the time this runs, the transaction has already
+            // rolled back everything written inside it (firstOrCreate()'s insert, the discount/
+            // required_amount saves), exactly because the violation above threw rather than returned. The
+            // appointment is left exactly as it was before this request, or simply never created at all.
+            $responseBody = [
+                'status' => false,
+                'message' => 'full_discount_requires_payment',
+                'details' => $e->details,
+            ];
+
+            $logService->validationFailed(
+                techId: $tech_id,
+                action: 'send_payment_links',
+                bookId: $book_id,
+                salesOrderId: $sales_order_id,
+                message: $e->getMessage(),
+                requestPayload: $request->all(),
+                responsePayload: $responseBody,
+                userId: auth()->id(),
+            );
+
+            return response()->json($responseBody, 400);
         } catch (\Throwable $e) {
             Log::error('sendPaymentLinks failed', [
                 'error' => $e->getMessage(),
