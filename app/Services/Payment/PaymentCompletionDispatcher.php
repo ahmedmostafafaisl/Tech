@@ -182,6 +182,7 @@ class PaymentCompletionDispatcher
                 if ($method === 'TABI')  $method = 'TABI';
                 if ($method === 'TAMARA') $method = 'TAMARA';
                 if ($method === 'E-COMMERCE' || $method === 'ECOMMERCE') $method = 'E-Commerce';
+                if ($method === 'ALINMAPAY') $method = 'AL-InmaPay';
 
                 return [
                     'TotalAmount'      => (float) ($p->price ?? 0),
@@ -708,6 +709,7 @@ class PaymentCompletionDispatcher
                 if ($method === 'TABBY')                              $method = 'TABI';
                 if ($method === 'TAMARA')                             $method = 'TAMARA';
                 if ($method === 'E-COMMERCE' || $method === 'ECOMMERCE') $method = 'E-Commerce';
+                if ($method === 'ALINMAPAY')                          $method = 'AL-InmaPay';
 
                 return [
                     'TotalAmount'      => (float) ($p->price ?? 0),

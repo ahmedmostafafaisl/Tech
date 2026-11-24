@@ -725,6 +725,97 @@ class ClickPayController extends Controller
 
     // NEW: GET /integration/clickpay/payment-details?tran_ref=...
     // GET /integration/clickpay/payment-details?reference_id=...
+    /**
+     * POST /integration/clickpay/capture
+     * Captures a previously-authorized payment — mirrors newRefund() exactly: an internal, admin-only
+     * endpoint (routes/api.php gates it the same way), the row locked while the provider is called so a
+     * double click or a retry cannot capture twice, and an uncertain outcome (timeout, non-JSON reply) never
+     * guesses success — the payment is left exactly as it was, with a message to confirm in the ClickPay
+     * dashboard before retrying.
+     */
+    public function capture(Request $request)
+    {
+        $validated = $request->validate([
+            'reference_id' => 'required|string',
+            'amount'       => 'required|numeric|min:0.01',
+        ]);
+
+        $actorId = $request->user()?->id;
+
+        return DB::transaction(function () use ($validated, $actorId) {
+            $payment = DirectAppointmentPayment::where('reference_id', $validated['reference_id'])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$payment) {
+                return response()->json(['success' => false, 'message' => 'Payment not found.'], 404);
+            }
+
+            if ($payment->status !== 'paid') {
+                return response()->json(['success' => false, 'message' => 'Only paid (authorized) payments can be captured.'], 422);
+            }
+
+            $amount = round((float) $validated['amount'], 2);
+
+            if ($amount > round((float) $payment->price, 2)) {
+                return response()->json(['success' => false, 'message' => 'Capture amount exceeds the authorized amount.'], 422);
+            }
+
+            $tranRef = $payment->payment_id ?: $payment->reference_id;
+            // Same style the original Sale/Auth request already uses (see createInvoiceNew()) — required:
+            // confirmed live in production that ClickPay rejects capture with "(102) Invalid cart
+            // description" when this is missing.
+            $cartDescription = 'Appointment #' . $payment->reference_id;
+
+            Log::info('ClickPay capture requested', [
+                'by_user_id'   => $actorId,
+                'reference_id' => $payment->reference_id,
+                'amount'       => $amount,
+            ]);
+
+            try {
+                $response = $this->clickPay->capture($tranRef, $amount, $cartDescription);
+            } catch (\Throwable $e) {
+                Log::error('ClickPay capture could not be confirmed; payment left unchanged', [
+                    'by_user_id'   => $actorId,
+                    'reference_id' => $payment->reference_id,
+                    'error'        => $e->getMessage(),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The capture could not be confirmed with ClickPay. Check the ClickPay dashboard before retrying.',
+                ], 502);
+            }
+
+            if (isset($response['response_code']) && $response['response_code'] === '000') {
+                Log::info('ClickPay capture succeeded', [
+                    'by_user_id'   => $actorId,
+                    'reference_id' => $payment->reference_id,
+                    'amount'       => $amount,
+                ]);
+
+                return response()->json([
+                    'success'  => true,
+                    'message'  => 'Capture successful.',
+                    'response' => $response,
+                ]);
+            }
+
+            Log::warning('ClickPay capture failed', [
+                'by_user_id'   => $actorId,
+                'reference_id' => $payment->reference_id,
+                'response'     => $response,
+            ]);
+
+            return response()->json([
+                'success'  => false,
+                'message'  => 'Capture failed.',
+                'response' => $response,
+            ], 422);
+        });
+    }
+
     public function getPaymentDetails(Request $request)
     {
         $request->validate([

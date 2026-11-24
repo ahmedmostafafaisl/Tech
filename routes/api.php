@@ -811,6 +811,8 @@ Route::post('/integration/tamara/notification/reference_id={reference_id}/sales_
 
 // ClickPay new integration
 Route::post('/integration/clickpay/success/reference_id={reference_id}/sales_order_id={sales_order_id}', [ClickPayController::class, 'newRefund'])->middleware(['auth:sanctum', 'role:super_admin|admin'])->name('new.clickpay.refund');
+// Moves real money, same as the refund route above — same auth + role gate.
+Route::post('/integration/clickpay/capture', [ClickPayController::class, 'capture'])->middleware(['auth:sanctum', 'role:super_admin|admin'])->name('new.clickpay.capture');
 Route::post('/integration/clickpay/callback', [ClickPayController::class, 'newHandleCallback'])->name('new.clickpay.callback');
 Route::match(['get', 'post'], '/integration/clickpay/return', [ClickPayController::class, 'newHandleReturn'])->name('new.clickpay.return');
 

@@ -360,6 +360,41 @@ class ClickPayService
     }
 
     /**
+     * Captures a previously-authorized (not yet captured) transaction — a separate step from the original
+     * Sale/Auth request, through the same unified /payment/request endpoint ClickPay/PayTabs' API uses for
+     * every transaction type, distinguished by tran_type ("capture" here, vs "sale"/"auth"/"refund"/"void").
+     * Note: unlike refund() (which has its own dedicated /v2/refund endpoint, confirmed already working in
+     * this codebase), I don't have a live way to verify capture's exact request shape against ClickPay's
+     * current API docs — this follows PayTabs/ClickPay's standard, publicly documented pattern, but is
+     * worth confirming against your merchant dashboard/API reference before relying on it for a real
+     * capture, since a wrong field here has real financial consequences.
+     *
+     * $cartDescription is required — confirmed live in production: ClickPay rejects the request outright
+     * with "(102) Invalid cart description" when it's missing, the same way the original Sale/Auth request
+     * already includes one (e.g. "Appointment #{reference}" — see createInvoiceNew()'s own cart_description).
+     */
+    public function capture(string $tranRef, float $amount, string $cartDescription): array
+    {
+        $payload = [
+            'profile_id'       => $this->profileId,
+            'tran_type'        => 'capture',
+            'tran_class'       => 'ecom',
+            'cart_id'          => 'CAPTURE-' . Str::uuid(),
+            'cart_description' => $cartDescription,
+            'cart_currency'    => 'SAR',
+            'cart_amount'      => number_format($amount, 2, '.', ''),
+            'tran_ref'         => $tranRef,
+        ];
+
+        $response = Http::withHeaders([
+            'authorization' => $this->serverKey,
+            'content-type'  => 'application/json',
+        ])->post("{$this->baseUrl}/payment/request", $payload);
+
+        return $response->json();
+    }
+
+    /**
      * Process refund
      */
     public function refund(string $tranRef, float $amount, string $reason = 'Customer refund'): array

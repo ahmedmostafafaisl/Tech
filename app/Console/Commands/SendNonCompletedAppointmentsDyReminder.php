@@ -98,6 +98,7 @@ class SendNonCompletedAppointmentsDyReminder extends Command
                     if ($method === 'TABBY') $method = 'TABI';
                     if ($method === 'TABI')  $method = 'TABI';
                     if ($method === 'E-COMMERCE' || $method === 'ECOMMERCE') $method = 'E-Commerce';
+                    if ($method === 'ALINMAPAY') $method = 'AL-InmaPay';
 
                     return [
                         'PaymentReference' => $payment->payment_id ?: ($payment->reference_id ?: null),
